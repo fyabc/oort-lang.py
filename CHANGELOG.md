@@ -42,11 +42,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   attribute reads/writes, lambdas and frame-captured closures. Function values
   can be stored, returned, indexed and called, and passed to native
   higher-order helpers such as `map`. Top-level dynamic classes and instance
-  methods (including inheritance, `__init__` and `__iter__`), plus module
-  imports (`import`/`from`, aliases, relative paths and `-I`), now run on the
-  VM as well; imported modules execute on the same VM with isolated globals.
-  `-t bc` prints the disassembly and `-t vm` executes that subset; `-t eval`
-  remains the default backend.
+  methods (including inheritance, `__init__` and `__iter__`), module imports
+  (`import`/`from`, aliases, relative paths and `-I`), and the `oort-core`
+  subset (typed static slots, monomorphic ADTs with `match`, and
+  `break`/`continue` including `break value`) now run on the VM as well.
+  Imported modules execute on the same VM with isolated globals, and every
+  `examples/08_core` program runs under `-t vm`. `-t bc` prints the
+  disassembly and `-t vm` executes that subset; `-t eval` remains the default
+  backend.
 - `oort-object` subscript and missing-attribute protocols (OP 0018):
   `def operator "[]"(index)` / `def operator "[]="(index, value)` for
   user-defined indexing (including slices and tuple indices), and a read-only

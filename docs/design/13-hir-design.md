@@ -1,9 +1,10 @@
 # HIR 设计（共享后端）
 
 > **状态**：HIR、32 位字节码编码/反汇编与寄存器 VM 第一切片已实现，当前子集
-> 包含 lambda/闭包、一等函数值、动态类/方法与模块导入（`src/oort_lang/hir/`、
-> `bytecode/`、`runtime/bytecode_vm.py`）。`-t eval` 仍是默认；差分测试已
-> 覆盖当前 HIR 子集。字节码 ISA 参考
+> 包含 lambda/闭包、一等函数值、动态/静态类、模块导入与 `oort-core`
+> 的 ADT/match（`src/oort_lang/hir/`、`bytecode/`、`runtime/bytecode_vm.py`）。
+> `-t eval` 仍是默认；差分测试已覆盖当前 HIR 子集，`examples/08_core` 全部
+> 可在 `-t vm` 下运行。字节码 ISA 参考
 > [02-bytecode-vm-design.md](02-bytecode-vm-design.md)，重实现约束见
 > [OP 0004](../proposals/0004-bytecode-vm.md)。
 
@@ -23,7 +24,7 @@ HIR 是 AST 与字节码之间的**线性寄存器中间表示**：
 
 ## 2. 第一切片范围
 
-支持的动态子集：
+支持的子集：
 
 - 模块顶层 `val`/`var`、赋值、函数定义与调用；
 - 函数值/lambda（显式参数与匿名 `$0`/`$1`）、闭包捕获外层局部变量；
@@ -31,6 +32,10 @@ HIR 是 AST 与字节码之间的**线性寄存器中间表示**：
   `__iter__` 迭代协议方法；
 - 顶层 `import` / `from ... import ...`（含别名、相对路径与 `-I` 搜索路径）；
   导入模块同样以字节码执行，并拥有独立的模块全局环境；
+- `oort-core` 静态类与槽：`val`/`var` 槽、槽初始化表达式、构造前初始化、
+  确定赋值检查与只读 `val` 槽；槽初始器降低为独立 proto；
+- `oort-core` 单态 ADT 与 `match`：构造器调用、通配/绑定/嵌套构造器模式、
+  顶层穷尽性（前端检查）；每个 arm 降低为独立函数，运行时匹配后调用；
 - `Int`/`Float`/`String`/`Bool`/`null` 字面量；
 - List/Tuple/Set/Dict 字面量、下标读取/赋值、切片（读取与赋值）、属性读写；
 - 一元/二元运算、`and`/`or` 短路；
@@ -39,11 +44,12 @@ HIR 是 AST 与字节码之间的**线性寄存器中间表示**：
 
 显式拒绝：
 
-- enum、match、嵌套函数定义、扩展方法、运算符方法、泛型；
-- 类方法、元类、类体槽声明/任意语句、嵌套类与类表达式、`super`；
+- 嵌套函数定义、扩展方法、运算符方法、泛型；
+- 类方法、元类、类体中方法/槽以外的语句、嵌套类与类表达式、`super`；
 - 关键字/默认/变长/块参数；
-- `break`/`continue`、`val`/参数/外层 `val` 赋值、模块级可变重定义
-  （当前按不可变名处理）；
+- `match` arm 内的 `return`（以及落到 arm 函数后会被当作“循环外”的
+  `break`/`continue`）；
+- `val`/参数/外层 `val` 赋值、模块级可变重定义（当前按不可变名处理）；
 - 循环体内创建 lambda（每迭代新绑定的捕获语义尚未实现）。
 
 这些限制是临时的；后续切片逐项放开并补差分测试。
@@ -59,7 +65,9 @@ HIR 是 AST 与字节码之间的**线性寄存器中间表示**：
 | `LOAD_G dst name` / `STORE_G name src` | 模块/内建全局名 |
 | `DEF_FUN name proto` | 按源码顺序定义函数 |
 | `MAKE_CLOSURE dst proto` | 创建闭包，捕获当前帧 |
-| `BUILD_CLASS dst name bases... methods...` | 创建动态类并绑定方法 |
+| `BUILD_CLASS dst name bases... methods... slots...` | 创建类、方法与静态槽 |
+| `BUILD_ENUM dst name constructors...` | 创建 ADT 类型与构造器 |
+| `MATCH dst scrutinee arms...` | 模式匹配；arm 为独立函数 |
 | `IMPORT module_path [as name]` / `IMPORT_FROM module_path names...` | 顶层模块导入 |
 | `LOAD_OUTER dst depth slot` / `STORE_OUTER depth slot src` | 读写外层帧局部槽 |
 | `MOVE dst src` | 寄存器复制 |
@@ -90,6 +98,9 @@ HIR 是 AST 与字节码之间的**线性寄存器中间表示**：
   `val`/参数写入在 lowering 阶段拒绝。
 - 闭包采用**帧捕获**而非 cell/upvalue 元数据：lambda 值持有定义时的 VM
   帧，帧再指向其外层帧；`LOAD_OUTER`/`STORE_OUTER` 沿该链访问寄存器。
+- loop lowering 维护 `(continue_label, break_label, result_reg)` 栈：
+  `continue` 跳到下一轮，`break` 跳到循环结束；带值 `break` 先 `MOVE` 到
+  循环结果寄存器，保持循环表达式的值语义。
 - 寄存器单调分配，不复用；上限 256（与设计 02 的 A/B/C 8 位字段一致）。
   超过上限报 `UnsupportedSyntax`。后续由寄存器分配器复用临时值。
 - `for` 循环变量按局部槽处理；循环体复用同一帧，因此循环内创建 lambda 会
@@ -109,9 +120,15 @@ HIR 是 AST 与字节码之间的**线性寄存器中间表示**：
 - 顶层导入按解释器语义**提升**到其他顶层语句之前，并按源码顺序执行；导入
   绑定写入当前模块环境。导入只允许模块顶层（前端已保证），块内/函数内导入
   显式拒绝。
-- 顶层类降低为 `BUILD_CLASS` + `STORE_G`；类体只允许实例方法定义，方法
+- 顶层类降低为 `BUILD_CLASS` + `STORE_G`；类体允许实例方法与槽声明，方法
   降低为 `has_this=True` 的函数，槽 0 固定为 `this`，显式参数从槽 1 开始。
-  方法定义时捕获类定义帧；基类表达式先求值到寄存器。
+  方法定义时捕获类定义帧；基类表达式先求值到寄存器。带初始化表达式的槽
+  额外降低为无参 `<slot name>` proto，实例化时先于 `__init__` 调用。
+- 枚举在定义处生成 `BUILD_ENUM`：构造器以不可变全局绑定，零参构造器为
+  单例 ADT 值，有参构造器为原生构造函数。
+- `match` 先求值 scrutinee 一次；每个 arm 的绑定名成为 arm 函数的参数，
+  arm 降低为可捕获当前帧的独立函数。运行时按模式依次匹配，命中后以绑定值
+  调用对应 arm 函数并把返回值写入 `MATCH` 的目标寄存器。
 - 函数体隐式返回最后一个表达式的值；显式 `return` 直接生成 `RET`。
 - 参数/局部变量不可变（与解释器一致）；HIR 第一切片在 lowering 阶段拒绝
   对不可变名的赋值，而不是延迟到 VM。
@@ -123,7 +140,8 @@ HIR 是 AST 与字节码之间的**线性寄存器中间表示**：
 - 寄存器编号在 `0..local_count-1`；
 - 跳转目标存在且标签不重复；
 - `DEF_FUN`/`MAKE_CLOSURE` 的 proto 索引有效；
-- `BUILD_CLASS` 的方法 proto 索引有效；
+- `BUILD_CLASS` 的方法与槽初始器 proto 索引有效；
+- `MATCH` 的 arm proto 索引有效；
 - `LOAD_OUTER`/`STORE_OUTER` 的 `depth >= 1`、`slot` 在 8 位范围；
 - 每个函数的 `local_count` 不超过 256。
 
@@ -146,8 +164,12 @@ dump 用于调试。
   `MAKE_CLOSURE`（ABx：proto 索引）。lambda proto 与顶层函数共用
   `BytecodeModule.functions`，由 `is_lambda` 仅在 HIR 层区分。
 - 类用 `BUILD_CLASS`（ABx：常量池中的 `ClassSpec`）。基类寄存器先 MOVE 到
-  scratch 区（`Proto.scratch_base`），`ClassSpec` 记录类名、基类数量和方法
-  `(name, proto)` 表；方法 proto 以 `has_this` 标记，参数表包含 `this`。
+  scratch 区（`Proto.scratch_base`），`ClassSpec` 记录类名、基类数量、方法
+  `(name, proto)` 表与槽 `(name, mutable, initializer proto?)` 表；方法 proto
+  以 `has_this` 标记，参数表包含 `this`。
+- 枚举用 `BUILD_ENUM`（ABx：`EnumSpec`）；`match` 用 `MATCH`（ABx：`MatchSpec`，
+  arm 模式为 `PatternSpec`）。编译时 scrutinee MOVE 到 scratch 区，scratch
+  需求随 `MATCH` 增至至少 1。
 - 导入用 `IMPORT`（ABx：常量池中的 `ImportSpec`）。`ImportSpec` 记录模块路径、
   别名、`from` 名单与 `is_from` 标志；无别名的 `import` 由运行时
   `ModuleLoader.binding_name` 推导绑定名。
@@ -180,12 +202,18 @@ dump 用于调试。
   交给同一个 VM。每个模块使用独立 `Environment`；`OortVMClosure` 记录其模块与
   环境，因此跨模块调用仍能读写定义模块的全局。`IMPORT` 定义不可变绑定；
   lowering 同时记录导入绑定名，后续对它的赋值在 lowering 阶段拒绝。
+- `BUILD_ENUM` 创建 `OortType`/`OortADT` 与构造器；`MATCH` 使用 VM 的模式匹配
+  辅助函数绑定 payload，再以绑定值调用 arm 闭包。静态槽由 `SlotDefinition`
+  记录（`initializer_callable` 为 VM 闭包）；`OortType.__call__` 在
+  `__init__` 前调用槽初始化闭包。VM 方法执行期间设置 `_current_method`，
+  使 `__init__` 能初始化只读 `val` 槽。
 - Int 算术/比较和一元运算有快速路径；其余类型回退到解释器的
   `apply_binary`/`apply_unary`，除法零仍产生带位置的 `OortRuntimeError`。
 - `-t vm` 执行当前 HIR 子集；`-t eval` 保持默认，未支持的构造由 HIR 明确拒绝。
 
 ## 9. 下一步
 
-1. 扩大 HIR/VM 子集：core 方言。
-2. 对 VM 与解释器做更广的差分/错误路径测试；逐步把 CLI 默认后端切到 VM。
+1. 扩大差分/错误路径测试，覆盖更多动态示例与边界组合。
+2. 评估把 CLI 默认后端切到 VM（先做性能与兼容性基线）。
 3. 继续优化：寄存器复用、常量内联、当前帧内联、类型特化；用基准证明。
+4. HIR/VM 稳定后再补正式规范（参考 Lua/CPython/JVM）。
