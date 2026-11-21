@@ -9,12 +9,15 @@ instead of silently skipping it.
 
 from __future__ import annotations
 
+from typing import Any
+
 from ..bytecode import (
     BytecodeModule,
     CallSpec,
     ClassSpec,
     Decoded,
     EnumSpec,
+    ExtensionSpec,
     ImportSpec,
     MatchSpec,
     PatternSpec,
@@ -59,6 +62,7 @@ from .objects import (
     OortSet,
     OortSlice,
     OortString,
+    OortSuperProxy,
     OortTuple,
 )
 from .type_system import OortType, SlotDefinition
@@ -67,18 +71,30 @@ _BINARY_SYMBOLS = {opcode: symbol for symbol, opcode in BINARY_OPCODES.items()}
 _UNARY_SYMBOLS = {opcode: symbol for symbol, opcode in UNARY_OPCODES.items()}
 
 
+class _Cell:
+    """Mutable local binding shared by a frame and its closures."""
+
+    __slots__ = ("value",)
+
+    def __init__(self, value: OortObject):
+        self.value = value
+
+
 class VMFrame:
     """Activation record captured by closures (frame-capture, not upvalues)."""
 
-    __slots__ = ("parent", "registers")
+    __slots__ = ("ext_env", "parent", "registers")
 
     def __init__(
         self,
-        registers: list[OortObject],
+        registers: list[Any],
         parent: VMFrame | None = None,
+        ext_env: Environment | None = None,
     ):
         self.registers = registers
         self.parent = parent
+        assert ext_env is not None
+        self.ext_env: Environment = ext_env
 
 
 class OortVMClosure(OortVMInvokable, OortObject):
@@ -91,6 +107,7 @@ class OortVMClosure(OortVMInvokable, OortObject):
         proto: Proto,
         frame: VMFrame | None = None,
         env: Environment | None = None,
+        definition_ext_env: Environment | None = None,
     ):
         super().__init__(vm.interpreter.runtime.types.function_type)
         self.vm = vm
@@ -98,6 +115,8 @@ class OortVMClosure(OortVMInvokable, OortObject):
         self.proto = proto
         self.frame = frame
         self.env = env if env is not None else vm.globals
+        self.definition_ext_env = definition_ext_env if definition_ext_env is not None else self.env
+        self.defining_type: OortType | None = None
         self._default_closures: dict[int, OortVMClosure] = {}
 
     @property
@@ -175,6 +194,7 @@ class OortVMClosure(OortVMInvokable, OortObject):
             self.module.functions[index],
             self.frame,
             self.env,
+            self.definition_ext_env,
         )
         self._default_closures[index] = cached
         return cached
@@ -207,6 +227,33 @@ class BytecodeVM:
     # Frames and dispatch
     # ------------------------------------------------------------------
 
+    def _new_registers(self, proto: Proto) -> list[Any]:
+        null = self.interpreter.runtime.null
+        if proto.uses_cells:
+            return [
+                *(_Cell(null) for _ in range(proto.local_count)),
+                *(null for _ in range(proto.register_count - proto.local_count)),
+            ]
+        return [null for _ in range(proto.register_count)]
+
+    @staticmethod
+    def _read_slot(proto: Proto, registers: list[Any], slot: int) -> OortObject:
+        value = registers[slot]
+        if proto.uses_cells:
+            assert isinstance(value, _Cell)
+            return value.value
+        assert isinstance(value, OortObject)
+        return value
+
+    @staticmethod
+    def _write_slot(proto: Proto, registers: list[Any], slot: int, value: OortObject) -> None:
+        if proto.uses_cells:
+            cell = registers[slot]
+            assert isinstance(cell, _Cell)
+            cell.value = value
+        else:
+            registers[slot] = value
+
     def invoke_positional_closure(
         self,
         closure: OortVMClosure,
@@ -230,12 +277,12 @@ class BytecodeVM:
                         else _fallback_position()
                     ),
                 )
-            registers = [self.interpreter.runtime.null for _ in range(closure.proto.register_count)]
+            registers = self._new_registers(closure.proto)
             if signature.has_this:
                 assert this is not None
-                registers[0] = this
+                self._write_slot(closure.proto, registers, 0, this)
             for param, value in zip(params, args, strict=True):
-                registers[param.slot] = value
+                self._write_slot(closure.proto, registers, param.slot, value)
             return self._execute(
                 closure.module,
                 closure.proto,
@@ -243,6 +290,7 @@ class BytecodeVM:
                 closure.frame,
                 closure.env,
                 registers=registers,
+                definition_ext_env=closure.definition_ext_env,
             )
         evaluated = [EvaluatedArg(value) for value in args]
         return self.invoke_evaluated_closure(closure, evaluated, position, this)
@@ -261,6 +309,7 @@ class BytecodeVM:
             bound,
             closure.frame,
             closure.env,
+            definition_ext_env=closure.definition_ext_env,
         )
 
     def _bind_closure(
@@ -363,6 +412,7 @@ class BytecodeVM:
             bound,
             default.frame,
             default.env,
+            definition_ext_env=default.definition_ext_env,
         )
 
     def _execute(
@@ -373,15 +423,21 @@ class BytecodeVM:
         parent_frame: VMFrame | None = None,
         env: Environment | None = None,
         *,
-        registers: list[OortObject] | None = None,
+        registers: list[Any] | None = None,
+        definition_ext_env: Environment | None = None,
     ) -> OortObject:
         if env is None:
             env = self.globals
         if registers is None:
-            registers = [self.interpreter.runtime.null for _ in range(proto.register_count)]
+            registers = self._new_registers(proto)
             for slot, value in (bound_values or {}).items():
-                registers[slot] = value
-        frame = VMFrame(registers, parent_frame)
+                self._write_slot(proto, registers, slot, value)
+        if proto is module.main:
+            ext_env = env
+        else:
+            base_env = definition_ext_env if definition_ext_env is not None else env
+            ext_env = Environment(outer=base_env, name="<extensions>")
+        frame = VMFrame(registers, parent_frame, ext_env)
         constants = proto.constants
         instructions = self._decoded(proto)
         positions = proto.positions
@@ -397,8 +453,13 @@ class BytecodeVM:
             if op is Op.LOAD_K:
                 registers[a] = self._wrap_constant(constants[decoded.bx])
                 pc += 1
-            elif op is Op.LOAD_L or op is Op.STORE_L:
-                registers[a] = registers[b]
+            elif op is Op.LOAD_L:
+                registers[a] = self._read_slot(proto, registers, b)
+                pc += 1
+            elif op is Op.STORE_L:
+                value = registers[b]
+                assert isinstance(value, OortObject)
+                self._write_slot(proto, registers, a, value)
                 pc += 1
             elif op is Op.LOAD_G:
                 name = str(constants[decoded.bx])
@@ -429,7 +490,7 @@ class BytecodeVM:
                         position,
                     )
                 if spec.is_from:
-                    _, values = loader.import_names(
+                    imported_module, values = loader.import_names(
                         spec.module_path,
                         [name for name, _ in spec.names],
                         position,
@@ -441,10 +502,12 @@ class BytecodeVM:
                             values[source],
                             position,
                         )
+                    env.add_imported_extension_scope(imported_module.env)
                 else:
                     imported = loader.import_module(spec.module_path, position)
                     name = spec.alias or loader.binding_name(spec.module_path, position)
                     self._define_import(env, name, imported, position)
+                    env.add_imported_extension_scope(imported.env)
                 pc += 1
             elif op is Op.LOAD_OUTER:
                 outer = frame
@@ -455,7 +518,8 @@ class BytecodeVM:
                             position,
                         )
                     outer = outer.parent
-                registers[a] = outer.registers[c]
+                value = outer.registers[c]
+                registers[a] = value.value if isinstance(value, _Cell) else value
                 pc += 1
             elif op is Op.STORE_OUTER:
                 outer = frame
@@ -466,7 +530,13 @@ class BytecodeVM:
                             position,
                         )
                     outer = outer.parent
-                outer.registers[b] = registers[c]
+                target = outer.registers[b]
+                value = registers[c]
+                assert isinstance(value, OortObject)
+                if isinstance(target, _Cell):
+                    target.value = value
+                else:
+                    outer.registers[b] = value
                 pc += 1
             elif op is Op.MAKE_CLOSURE:
                 proto_index = decoded.bx
@@ -475,12 +545,22 @@ class BytecodeVM:
                         f"Invalid bytecode function index {proto_index}.",
                         position,
                     )
+                captured = (
+                    VMFrame(
+                        list(registers[: proto.local_count]),
+                        frame.parent,
+                        frame.ext_env,
+                    )
+                    if proto.uses_cells
+                    else frame
+                )
                 registers[a] = OortVMClosure(
                     self,
                     module,
                     module.functions[proto_index],
-                    frame,
+                    captured,
                     env,
+                    frame.ext_env,
                 )
                 pc += 1
             elif op is Op.BUILD_ENUM:
@@ -562,8 +642,21 @@ class BytecodeVM:
                             position,
                         )
                     bases.append(base)
+                metaclass = None
+                if spec.has_metaclass:
+                    candidate = registers[proto.scratch_base + spec.base_count]
+                    if not isinstance(candidate, OortType):
+                        raise OortTypeError(
+                            f"{candidate.type.name!r} object is not a class",
+                            position,
+                        )
+                    metaclass = candidate
                 try:
-                    cls = OortType.create_type_object(spec.name, bases=bases)
+                    cls = OortType.create_type_object(
+                        spec.name,
+                        bases=bases,
+                        metaclass=metaclass,
+                    )
                 except TypeError as exc:
                     raise OortTypeError(str(exc), position) from exc
                 for method_name, method_index in spec.methods:
@@ -572,49 +665,48 @@ class BytecodeVM:
                             f"Invalid bytecode method index {method_index}.",
                             position,
                         )
-                    cls.set(
-                        method_name,
-                        OortVMClosure(
-                            self,
-                            module,
-                            module.functions[method_index],
-                            frame,
-                            env,
-                        ),
+                    method = OortVMClosure(
+                        self,
+                        module,
+                        module.functions[method_index],
+                        frame,
+                        env,
+                        frame.ext_env,
                     )
+                    method.defining_type = cls
+                    cls.set(method_name, method)
                 for method_name, method_index in spec.class_methods:
                     if not 0 <= method_index < len(module.functions):
                         raise OortTypeError(
                             f"Invalid bytecode class method index {method_index}.",
                             position,
                         )
-                    cls.set_class_field(
-                        method_name,
-                        OortVMClosure(
-                            self,
-                            module,
-                            module.functions[method_index],
-                            frame,
-                            env,
-                        ),
+                    method = OortVMClosure(
+                        self,
+                        module,
+                        module.functions[method_index],
+                        frame,
+                        env,
+                        frame.ext_env,
                     )
+                    method.defining_type = cls
+                    cls.set_class_field(method_name, method)
                 for symbol, operand_count, method_index in spec.operators:
                     if not 0 <= method_index < len(module.functions):
                         raise OortTypeError(
                             f"Invalid bytecode operator index {method_index}.",
                             position,
                         )
-                    cls.set_operator(
-                        symbol,
-                        operand_count,
-                        OortVMClosure(
-                            self,
-                            module,
-                            module.functions[method_index],
-                            frame,
-                            env,
-                        ),
+                    method = OortVMClosure(
+                        self,
+                        module,
+                        module.functions[method_index],
+                        frame,
+                        env,
+                        frame.ext_env,
                     )
+                    method.defining_type = cls
+                    cls.set_operator(symbol, operand_count, method)
                 for slot_name, mutable, initializer_index in spec.slots:
                     initializer_closure = None
                     if initializer_index is not None:
@@ -629,6 +721,7 @@ class BytecodeVM:
                             module.functions[initializer_index],
                             frame,
                             env,
+                            frame.ext_env,
                         )
                     cls.slots[slot_name] = SlotDefinition(
                         name=slot_name,
@@ -645,7 +738,14 @@ class BytecodeVM:
                 proto_index = decoded.bx
                 if not 0 <= proto_index < len(module.functions):
                     raise OortTypeError(f"Invalid bytecode function index {proto_index}.", position)
-                function = OortVMClosure(self, module, module.functions[proto_index], None, env)
+                function = OortVMClosure(
+                    self,
+                    module,
+                    module.functions[proto_index],
+                    None,
+                    env,
+                    frame.ext_env,
+                )
                 env.define(function.proto.name, function, mutable=False)
                 self._cache_for(env)[function.proto.name] = function
                 pc += 1
@@ -653,10 +753,16 @@ class BytecodeVM:
                 registers[a] = registers[b]
                 pc += 1
             elif op in _BINARY_SYMBOLS:
-                registers[a] = self._binary(op, registers[b], registers[c], position)
+                registers[a] = self._binary(
+                    op,
+                    registers[b],
+                    registers[c],
+                    position,
+                    frame.ext_env,
+                )
                 pc += 1
             elif op in _UNARY_SYMBOLS:
-                registers[a] = self._unary(op, registers[b], position)
+                registers[a] = self._unary(op, registers[b], position, frame.ext_env)
                 pc += 1
             elif op is Op.JUMP:
                 pc = pc + 1 + decoded.sbx
@@ -692,9 +798,69 @@ class BytecodeVM:
                     registers[b + 2] if c & 4 else None,
                 )
                 pc += 1
+            elif op is Op.SUPER:
+                receiver = registers[b]
+                assert isinstance(receiver, OortObject)
+                defining_type = getattr(self.interpreter._current_method, "defining_type", None)
+                if defining_type is None or not (
+                    isinstance(receiver, OortObject) and defining_type in receiver.type.mro()
+                ):
+                    defining_type = receiver.type
+                registers[a] = OortSuperProxy(defining_type, receiver)
+                pc += 1
+            elif op is Op.REGISTER_EXT:
+                spec = constants[decoded.bx]
+                if not isinstance(spec, ExtensionSpec):
+                    raise OortTypeError("Invalid extension descriptor in bytecode.", position)
+                if not 0 <= spec.function_index < len(module.functions):
+                    raise OortTypeError(
+                        f"Invalid bytecode extension index {spec.function_index}.",
+                        position,
+                    )
+                receiver = registers[a]
+                if not isinstance(receiver, OortType):
+                    raise OortTypeError("Extension receiver is not a type.", position)
+                extension = OortVMClosure(
+                    self,
+                    module,
+                    module.functions[spec.function_index],
+                    frame,
+                    env,
+                    frame.ext_env,
+                )
+                extension.defining_type = receiver
+                if spec.symbol is not None:
+                    result = frame.ext_env.register_extension_operator(
+                        receiver,
+                        spec.symbol,
+                        spec.operand_count,
+                        extension,
+                    )
+                    duplicate = (
+                        f"Extension operator {spec.symbol!r} for {receiver.name!r} "
+                        "is already defined in this scope."
+                    )
+                else:
+                    result = frame.ext_env.register_extension(
+                        receiver,
+                        spec.name,
+                        extension,
+                    )
+                    duplicate = (
+                        f"Extension method {receiver.name!r}.{spec.name} "
+                        "is already defined in this scope."
+                    )
+                if result == DefineResult.REDEFINED:
+                    raise OortTypeError(duplicate, position)
+                pc += 1
             elif op is Op.GET_ATTR:
                 name = str(constants[decoded.bx])
-                registers[a] = self.interpreter.get_attribute(registers[a], name, position)
+                registers[a] = self.interpreter.get_attribute(
+                    registers[a],
+                    name,
+                    position,
+                    env=frame.ext_env,
+                )
                 pc += 1
             elif op is Op.SET_ATTR:
                 name = str(constants[decoded.bx])
@@ -705,6 +871,7 @@ class BytecodeVM:
                     registers[b],
                     registers[c],
                     position,
+                    env=frame.ext_env,
                 )
                 pc += 1
             elif op is Op.SET_ITEM:
@@ -713,6 +880,7 @@ class BytecodeVM:
                     registers[b],
                     registers[c],
                     position,
+                    env=frame.ext_env,
                 )
                 pc += 1
             elif op is Op.CALL:
@@ -780,7 +948,15 @@ class BytecodeVM:
                         position,
                     )
                 for index, element in enumerate(values):
-                    registers[b + index] = element
+                    self._write_slot(proto, registers, b + index, element)
+                pc += 1
+            elif op is Op.FRESH:
+                slots = constants[decoded.bx]
+                if not isinstance(slots, tuple):
+                    raise OortTypeError("Invalid fresh-locals descriptor.", position)
+                if proto.uses_cells:
+                    for slot in slots:
+                        registers[slot] = _Cell(self.interpreter.runtime.null)
                 pc += 1
             elif op is Op.EXTEND:
                 pc += 1
@@ -847,6 +1023,7 @@ class BytecodeVM:
         left: OortObject,
         right: OortObject,
         position: SourcePosition,
+        env: Environment,
     ) -> OortObject:
         if type(left) is OortInt and type(right) is OortInt:
             lv = left.value
@@ -884,9 +1061,21 @@ class BytecodeVM:
                 return OortBool.get_bool_value(lv > rv)
             if op is Op.GE:
                 return OortBool.get_bool_value(lv >= rv)
-        return self.interpreter.apply_binary(_BINARY_SYMBOLS[op], left, right, position)
+        return self.interpreter.apply_binary(
+            _BINARY_SYMBOLS[op],
+            left,
+            right,
+            position,
+            env=env,
+        )
 
-    def _unary(self, op: Op, operand: OortObject, position: SourcePosition) -> OortObject:
+    def _unary(
+        self,
+        op: Op,
+        operand: OortObject,
+        position: SourcePosition,
+        env: Environment,
+    ) -> OortObject:
         if type(operand) is OortInt:
             if op is Op.NEG:
                 return OortInt(-operand.value)
@@ -894,7 +1083,12 @@ class BytecodeVM:
                 return OortInt(operand.value)
             if op is Op.INVERT:
                 return OortInt(~operand.value)
-        return self.interpreter.apply_unary(_UNARY_SYMBOLS[op], operand, position)
+        return self.interpreter.apply_unary(
+            _UNARY_SYMBOLS[op],
+            operand,
+            position,
+            env=env,
+        )
 
     def _call(
         self,

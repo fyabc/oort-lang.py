@@ -14,6 +14,7 @@ from oort_lang.hir import (
     BuildSlice,
     Call,
     DefineFunction,
+    FreshLocals,
     GetAttr,
     GetItem,
     ImportFrom,
@@ -26,11 +27,13 @@ from oort_lang.hir import (
     LoadOuter,
     MakeClosure,
     Match,
+    RegisterExtension,
     SetAttr,
     SetItem,
     StoreGlobal,
     StoreLocal,
     StoreOuter,
+    SuperProxy,
     Unpack,
     lower_module,
     validate_module,
@@ -248,6 +251,43 @@ def test_classes_lower_operator_methods_separately():
     assert negate.params == ("this",)
 
 
+def test_metaclass_and_super_lower():
+    module = lower(
+        """class M < Type {}
+class Base { def name() { "base" } }
+class C < Base :: M { def name() { super.name() } }
+print(C().name())
+"""
+    )
+    builds = [i for i in module.main.code if isinstance(i, BuildClass)]
+    target = next(build for build in builds if build.name == "C")
+    assert target.metaclass is not None
+    method = module.functions[target.methods[0][1]]
+    assert any(isinstance(i, SuperProxy) for i in method.code)
+
+
+def test_extension_methods_lower_to_registration():
+    module = lower(
+        """class Counter {
+    def __init__(n) { this.n = n }
+}
+def Counter.bump { this.n = this.n + 1 }
+def Int.twice: this * 2
+def String.operator "**"(times) { this }
+"""
+    )
+    registrations = [i for i in module.main.code if isinstance(i, RegisterExtension)]
+    assert [(item.name, item.symbol, item.operand_count) for item in registrations] == [
+        ("bump", None, 0),
+        ("twice", None, 0),
+        ("operator **", "**", 2),
+    ]
+    for item in registrations:
+        function = module.functions[item.function_index]
+        assert function.has_this
+        assert function.params[0] == "this"
+
+
 def test_class_bases_lower_to_registers():
     module = lower(
         """class Base { def value() { 1 } }
@@ -355,15 +395,17 @@ print(outer()())
     assert any(isinstance(i, StoreLocal) for i in outer.code)
 
 
-def test_nested_functions_inside_loops_are_rejected():
+def test_nested_functions_inside_loops_lower_with_fresh_locals():
     source = """def outer() {
     for i in [1] {
         def f() { i }
     }
 }
 """
-    with pytest.raises(UnsupportedSyntax, match="inside loops"):
-        lower_module(build_ast(source))
+    module = lower(source)
+    outer = next(function for function in module.functions if function.name == "outer")
+    assert any(isinstance(i, FreshLocals) for i in outer.code)
+    assert any(isinstance(i, MakeClosure) for i in outer.code)
 
 
 def test_signatures_and_default_protos_lower():
@@ -487,7 +529,6 @@ def test_unsupported_nodes_are_rejected(source: str, detail: str):
         ("class C { print(1) }\n", "class-body"),
         ("def f() { class C {} }\nf()\n", "nested class"),
         ("class C { def __str__: 1 }\n", "special method"),
-        ("class A { def f: 1 }\nclass C < A { def f: super.f() }\n", "ImplicitSuperExpr"),
     ],
 )
 def test_unsupported_class_forms_are_rejected(source: str, detail: str):
@@ -495,9 +536,10 @@ def test_unsupported_class_forms_are_rejected(source: str, detail: str):
         lower_module(build_ast(source))
 
 
-def test_lambda_inside_loop_is_rejected():
-    with pytest.raises(UnsupportedSyntax, match="lambdas created inside loops"):
-        lower_module(build_ast("while false { val f = do: 1 }\n"))
+def test_lambda_inside_loop_lowers_with_fresh_locals():
+    module = lower("var fs = []\nwhile false { val f = do: 1\nfs = fs + [f] }\n")
+    assert any(isinstance(i, FreshLocals) for i in module.main.code)
+    assert any(isinstance(i, MakeClosure) for i in module.main.code)
 
 
 def test_lambda_assigning_immutable_outer_is_rejected():

@@ -28,6 +28,7 @@ from .nodes import (
     BuildTuple,
     Call,
     DefineFunction,
+    FreshLocals,
     GetAttr,
     GetItem,
     HirFunction,
@@ -50,12 +51,14 @@ from .nodes import (
     Move,
     OpenIterator,
     Pattern,
+    RegisterExtension,
     Return,
     SetAttr,
     SetItem,
     StoreGlobal,
     StoreLocal,
     StoreOuter,
+    SuperProxy,
     UnOp,
     Unpack,
     validate_module,
@@ -106,6 +109,7 @@ class _FunctionState:
     loop_depth: int = 0
     loop_stack: list[tuple[str, str, int]] = dataclasses.field(default_factory=list)
     in_match_arm: bool = False
+    local_slots: set[int] = dataclasses.field(default_factory=set)
 
 
 class HirLowerer:
@@ -130,7 +134,10 @@ class HirLowerer:
         class_slots: dict[int, tuple[tuple[nodes.VarDecl, int | None], ...]] = {}
         for stmt in statements:
             if isinstance(stmt, nodes.FunctionDef) and not stmt.is_lambda:
-                self._validate_top_level_function(stmt)
+                if stmt.is_extension:
+                    self._validate_extension_function(stmt)
+                else:
+                    self._validate_top_level_function(stmt)
                 function_defs[id(stmt)] = self._reserve_function_index()
             elif isinstance(stmt, nodes.ClassDef):
                 methods: list[tuple[nodes.FunctionDef, int]] = []
@@ -174,7 +181,10 @@ class HirLowerer:
         )
         for stmt in statements:
             if isinstance(stmt, nodes.FunctionDef) and not stmt.is_lambda:
-                self._lower_function(stmt, function_defs[id(stmt)])
+                if stmt.is_extension:
+                    self._lower_extension_function(stmt, function_defs[id(stmt)])
+                else:
+                    self._lower_function(stmt, function_defs[id(stmt)])
             elif isinstance(stmt, nodes.ClassDef):
                 for method, index in (
                     *class_methods[id(stmt)],
@@ -225,8 +235,6 @@ class HirLowerer:
             self._reject(node, "namespaced or anonymous classes")
         if node.type_params:
             self._reject(node, "generic classes")
-        if node.meta is not None:
-            self._reject(node, "metaclasses")
 
     def _validate_class_method(self, node: nodes.FunctionDef) -> None:
         if node.is_extension:
@@ -241,6 +249,57 @@ class HirLowerer:
             node.is_class_method or node.name not in ("__init__", "__iter__")
         ):
             self._reject(node, f"special method {node.name!r}")
+
+    def _validate_extension_function(self, node: nodes.FunctionDef) -> None:
+        if not node.is_extension:
+            self._reject(node, "extension method without a receiver type")
+        if node.type_params:
+            self._reject(node, "generic extension methods")
+        if _is_reserved_method_name(node.name):
+            self._reject(node, f"special extension method {node.name!r}")
+
+    def _lower_identifier(self, name: str, position: SourcePosition) -> int:
+        local = self._find_local(name)
+        if local is not None:
+            dst = self._alloc(position)
+            self._emit(LoadLocal(position, dst, local.slot))
+            return dst
+        outer = self._find_outer(name)
+        if outer is not None:
+            owner_index, binding = outer
+            dst = self._alloc(position)
+            self._emit(
+                LoadOuter(
+                    position,
+                    dst,
+                    len(self._states) - 1 - owner_index,
+                    binding.slot,
+                )
+            )
+            return dst
+        dst = self._alloc(position)
+        self._emit(LoadGlobal(position, dst, name))
+        return dst
+
+    def _emit_extension_registration(self, node: nodes.FunctionDef, index: int) -> None:
+        receiver_name = node.extension_receiver
+        assert receiver_name is not None
+        receiver = self._lower_identifier(receiver_name, node.name_position)
+        symbol = node.operator_symbol
+        operand_count = node.operator_operand_count
+        self._emit(
+            RegisterExtension(
+                node.position,
+                receiver,
+                node.name,
+                index,
+                symbol,
+                operand_count if operand_count is not None else 0,
+            )
+        )
+
+    def _lower_extension_function(self, node: nodes.FunctionDef, index: int) -> None:
+        self._lower_method(node, index)
 
     def _validate_top_level_function(self, node: nodes.FunctionDef) -> None:
         if node.is_extension:
@@ -274,9 +333,13 @@ class HirLowerer:
                 if isinstance(stmt, (nodes.ImportStmt, nodes.ImportFromStmt)):
                     continue
                 if isinstance(stmt, nodes.FunctionDef) and not stmt.is_lambda:
+                    index = function_defs[id(stmt)]
+                    if stmt.is_extension:
+                        self._emit_extension_registration(stmt, index)
+                        last = None
+                        continue
                     self._validate_top_level_function(stmt)
                     name = stmt.name
-                    index = function_defs[id(stmt)]
                     self._emit(DefineFunction(stmt.position, name, index))
                     self._global_mutability[name] = False
                     last = None
@@ -372,6 +435,7 @@ class HirLowerer:
         slots: tuple[tuple[nodes.VarDecl, int | None], ...],
     ) -> None:
         bases = tuple(self._require_value(base) for base in node.bases)
+        metaclass = None if node.meta is None else self._require_value(node.meta)
         dst = self._alloc(node.position)
         slot_specs = [
             (slot.decl_targets[0].name, slot.mutable, initializer) for slot, initializer in slots
@@ -392,6 +456,7 @@ class HirLowerer:
                 tuple(slot_specs),
                 tuple((method.name, index) for method, index in class_level_methods),
                 tuple(operator_specs),
+                metaclass=metaclass,
             )
         )
         self._emit(StoreGlobal(node.name_position, node.name, dst))
@@ -464,12 +529,6 @@ class HirLowerer:
 
     def _lower_nested_function(self, node: nodes.FunctionDef) -> int:
         self._validate_top_level_function(node)
-        if self.state.loop_depth:
-            self._reject(
-                node,
-                "nested function definitions inside loops "
-                "(per-iteration capture is not implemented)",
-            )
         slot = self._declare_local(
             node.name,
             mutable=False,
@@ -504,11 +563,6 @@ class HirLowerer:
         return dst
 
     def _lower_lambda(self, node: nodes.FunctionDef) -> int:
-        if self.state.loop_depth:
-            self._reject(
-                node,
-                "lambdas created inside loops (per-iteration capture is not implemented)",
-            )
         if node.type_params:
             self._reject(node, "generic lambdas")
         names, signature = self._lower_signature(node, anonymous=True, start_slot=0)
@@ -670,6 +724,12 @@ class HirLowerer:
         if isinstance(node, nodes.FunctionDef):
             if node.is_lambda:
                 return self._lower_expr(node)
+            if node.is_extension:
+                self._validate_extension_function(node)
+                index = self._reserve_function_index()
+                self._emit_extension_registration(node, index)
+                self._lower_extension_function(node, index)
+                return None
             return self._lower_nested_function(node)
         return self._lower_expr(node)
 
@@ -789,6 +849,13 @@ class HirLowerer:
             self._reject(node, "ellipsis")
         if isinstance(node, nodes.Name):
             return self._lower_name(node)
+        if isinstance(node, nodes.ImplicitSuperExpr):
+            this = self._find_local("this")
+            if this is None:
+                self._reject(node, "super outside a method")
+            dst = self._alloc(node.position)
+            self._emit(SuperProxy(node.position, dst, this.slot))
+            return dst
         if isinstance(node, nodes.ClassDef):
             self._reject(node, "class expressions")
         if isinstance(node, nodes.EnumDef):
@@ -924,9 +991,11 @@ class HirLowerer:
         result = self._const(None, node.position)
         start = self._new_label("while")
         end = self._new_label("endwhile")
+        before = set(self.state.local_slots)
         self._emit(Label(node.position, start))
         condition = self._require_value(node.condition)
         self._emit(JumpIfFalse(node.position, condition, end))
+        fresh_index = len(self.state.code)
         self.state.loop_depth += 1
         self.state.loop_stack.append((start, end, result))
         try:
@@ -934,6 +1003,12 @@ class HirLowerer:
         finally:
             self.state.loop_stack.pop()
             self.state.loop_depth -= 1
+        loop_slots = tuple(sorted(self.state.local_slots - before))
+        if loop_slots:
+            self.state.code.insert(
+                fresh_index,
+                FreshLocals(node.position, loop_slots),
+            )
         self._emit(Jump(node.position, start))
         self._emit(Label(node.position, end))
         return result
@@ -942,6 +1017,7 @@ class HirLowerer:
         if not node.vars:
             self._reject(node, "loop without variables")
         result = self._const(None, node.position)
+        before = set(self.state.local_slots)
         iterable = self._require_value(node.iterator)
         iterator = self._alloc(node.position)
         self._emit(OpenIterator(node.position, iterator, iterable))
@@ -960,6 +1036,7 @@ class HirLowerer:
                 )
                 for loop_var in node.vars
             ]
+            fresh_index = len(self.state.code)
             if len(slots) == 1:
                 self._emit(StoreLocal(node.vars[0].position, slots[0], value))
             else:
@@ -980,6 +1057,12 @@ class HirLowerer:
                 self.state.loop_depth -= 1
         finally:
             self._pop_scope()
+        loop_slots = tuple(sorted(self.state.local_slots - before))
+        if loop_slots:
+            self.state.code.insert(
+                fresh_index,
+                FreshLocals(node.position, loop_slots),
+            )
         self._emit(Jump(node.position, start))
         self._emit(Label(node.position, end))
         return result
@@ -1017,8 +1100,6 @@ class HirLowerer:
     def _lower_call(self, node: nodes.Call) -> int:
         if node.infix:
             self._reject(node, "infix calls")
-        if isinstance(node.func, nodes.Name) and node.func.id == "super":
-            self._reject(node, "super calls")
         callee = self._require_value(node.func)
         positional: list[int] = []
         keywords: list[tuple[str, int]] = []
@@ -1064,6 +1145,7 @@ class HirLowerer:
     def _declare_local(self, name: str, *, mutable: bool, position: SourcePosition) -> int:
         slot = self._alloc(position)
         self.state.scopes[-1][name] = _ScopeName(slot=slot, mutable=mutable)
+        self.state.local_slots.add(slot)
         return slot
 
     def _find_local(self, name: str) -> _ScopeName | None:

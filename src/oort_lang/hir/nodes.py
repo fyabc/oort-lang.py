@@ -41,6 +41,13 @@ class StoreLocal(Instruction):
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class FreshLocals(Instruction):
+    """Replace per-iteration local cells at the top of a loop body."""
+
+    slots: tuple[int, ...]
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class LoadOuter(Instruction):
     dst: int
     depth: int
@@ -87,6 +94,7 @@ class BuildClass(Instruction):
     slots: tuple[tuple[str, bool, int | None], ...] = ()
     class_methods: tuple[tuple[str, int], ...] = ()
     operators: tuple[tuple[str, int, int], ...] = ()
+    metaclass: int | None = None
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -213,6 +221,21 @@ class GetAttr(Instruction):
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class RegisterExtension(Instruction):
+    receiver: int
+    name: str
+    function_index: int
+    symbol: str | None = None
+    operand_count: int = 0
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class SuperProxy(Instruction):
+    dst: int
+    receiver: int
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class SetAttr(Instruction):
     value: int
     name: str
@@ -290,7 +313,7 @@ def register_reads(instruction: Instruction) -> tuple[int, ...]:
     """Registers read by an instruction."""
     if isinstance(instruction, (LoadLocal,)):
         return ()
-    if isinstance(instruction, (LoadConst, LoadGlobal, Label, Jump, DefineFunction)):
+    if isinstance(instruction, (LoadConst, LoadGlobal, Label, Jump, DefineFunction, FreshLocals)):
         return ()
     if isinstance(instruction, BuildClass):
         return instruction.bases
@@ -326,6 +349,10 @@ def register_reads(instruction: Instruction) -> tuple[int, ...]:
         )
     if isinstance(instruction, GetAttr):
         return (instruction.value,)
+    if isinstance(instruction, SuperProxy):
+        return (instruction.receiver,)
+    if isinstance(instruction, RegisterExtension):
+        return (instruction.receiver,)
     if isinstance(instruction, SetAttr):
         return (instruction.value, instruction.src)
     if isinstance(instruction, GetItem):
@@ -370,6 +397,7 @@ def register_writes(instruction: Instruction) -> tuple[int, ...]:
             BuildSlice,
             GetAttr,
             GetItem,
+            SuperProxy,
             LoadOuter,
             MakeClosure,
             BuildClass,
@@ -402,7 +430,7 @@ def validate_module(module: HirModule) -> None:
                 targets.append(instruction.target)
             elif isinstance(instruction, IteratorNext):
                 targets.append(instruction.done)
-            elif isinstance(instruction, (DefineFunction, MakeClosure)):
+            elif isinstance(instruction, (DefineFunction, MakeClosure, RegisterExtension)):
                 if not 0 <= instruction.function_index < len(module.functions):
                     raise ValueError(
                         f"{function.name}: bad function index {instruction.function_index}"
@@ -424,6 +452,12 @@ def validate_module(module: HirModule) -> None:
                         raise ValueError(
                             f"{function.name}: bad slot initializer index {initializer} "
                             f"for {slot_name!r}"
+                        )
+            if isinstance(instruction, FreshLocals):
+                for slot in instruction.slots:
+                    if not 0 <= slot < function.local_count:
+                        raise ValueError(
+                            f"{function.name}: fresh local slot {slot} outside local_count"
                         )
             if isinstance(instruction, (LoadOuter, StoreOuter)):
                 if instruction.depth < 1:

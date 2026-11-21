@@ -7,6 +7,7 @@ from .code import (
     CallSpec,
     ClassSpec,
     EnumSpec,
+    ExtensionSpec,
     ImportSpec,
     MatchSpec,
     Proto,
@@ -58,6 +59,7 @@ def _format(proto: Proto, pc: int, decoded: Decoded) -> str:
                     class_methods,
                     operators,
                     f"slots=({slots})" if slots else "",
+                    "metaclass" if spec.has_metaclass else "",
                 )
                 if part
             )
@@ -146,6 +148,20 @@ def _format(proto: Proto, pc: int, decoded: Decoded) -> str:
     if op is Op.UNPACK:
         end = decoded.b + decoded.c - 1
         return f"UNPACK R{decoded.a} -> R{decoded.b}..R{end}"
+    if op is Op.FRESH:
+        return f"FRESH slots={_const(proto, decoded.bx)}"
+    if op is Op.SUPER:
+        return f"SUPER R{decoded.a} R{decoded.b}"
+    if op is Op.REGISTER_EXT:
+        spec = proto.constants[decoded.bx] if 0 <= decoded.bx < len(proto.constants) else None
+        if isinstance(spec, ExtensionSpec):
+            if spec.symbol is not None:
+                return (
+                    f"REGISTER_EXT R{decoded.a} operator {spec.symbol!r}/"
+                    f"{spec.operand_count} proto[{spec.function_index}]"
+                )
+            return f"REGISTER_EXT R{decoded.a} {spec.name} proto[{spec.function_index}]"
+        return f"REGISTER_EXT R{decoded.a} <bad spec>"
     if op in (Op.NEW_LIST, Op.NEW_TUPLE, Op.NEW_SET):
         return f"{op.name} R{decoded.a} base=R{decoded.b} count={decoded.c}"
     if op is Op.NEW_DICT:

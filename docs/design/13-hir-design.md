@@ -43,10 +43,12 @@ HIR 是 AST 与字节码之间的**线性寄存器中间表示**：
 - 完整参数绑定：默认值、关键字实参、位置/关键字限定、`*args`、`**kwargs`、
   `&block`；默认值在调用时求值，可引用定义处闭包与更早参数；
 - 函数值/lambda（显式参数与匿名 `$0`/`$1`）、嵌套具名函数（含自递归）、
-  闭包捕获外层局部变量；
+  闭包捕获外层局部变量；循环内创建的函数按迭代获得独立绑定；
 - 多变量 `for` 解包（Tuple/List 元素，运行期校验长度）；
-- 模块顶层动态类、实例方法、类方法、运算符方法、单/多继承与 `this`；
-  `__init__` 构造与 `__iter__` 迭代协议方法；
+- 模块顶层动态类、实例方法、类方法、运算符方法、单/多继承、元类与 `this`；
+  `__init__` 构造、`__iter__` 迭代协议方法与 `super` 调用；
+- 扩展方法与扩展运算符：`def C.f` / `def C.operator` 按词法作用域注册并参与
+  属性/运算符回退，包含导入模块的扩展激活与扩展内 `super`；
 - 增强赋值：先读左侧当前值，再计算并写回；支持名字、属性与下标目标，
   下标/属性的接收者在读写两侧按解释器顺序求值；
 - 顶层 `import` / `from ... import ...`（含别名、相对路径与 `-I` 搜索路径）；
@@ -63,14 +65,14 @@ HIR 是 AST 与字节码之间的**线性寄存器中间表示**：
 
 显式拒绝：
 
-- 扩展方法与扩展运算符、泛型；
-- 元类、类体中方法/槽以外的语句、嵌套类与类表达式、`super` 调用；
+- 泛型类/函数/方法、命名空间类与方法、匿名类与类表达式；
+- 类体中方法/槽以外的语句、嵌套类、显式 `super(...)`；
 - 调用侧 `*`/`**` 展开（`f(*xs)`/`f(**d)`）；匿名 lambda 的关键字实参；
 - 默认表达式引用类体成员（第一切片显式拒绝）；
 - `match` arm 内的 `return`（以及落到 arm 函数后会被当作“循环外”的
   `break`/`continue`）；
 - `val`/参数/外层 `val` 赋值、模块级可变重定义（当前按不可变名处理）；
-- 循环体内创建 lambda 或嵌套函数（每迭代新绑定的捕获语义尚未实现）。
+- 循环体块级扩展定义的作用域收窄（当前按函数调用作用域注册）。
 
 这些限制是临时的；后续切片逐项放开并补差分测试。
 
@@ -100,6 +102,9 @@ HIR 是 AST 与字节码之间的**线性寄存器中间表示**：
 | `OPEN_ITER dst iterable` | 打开迭代器（复用现有协议） |
 | `ITER_NEXT value iterator done_label` | 取值；无效时跳到 done |
 | `UNPACK source base count` | 多变量 `for` 解包到连续槽 |
+| `FRESH_LOCALS slots...` | 循环每轮替换局部 cell，隔离迭代闭包 |
+| `SUPER dst receiver` | 基于当前方法的定义类型创建 `super` 代理 |
+| `REGISTER_EXT receiver name proto` | 注册当前词法作用域的扩展方法/运算符 |
 | `BUILD_LIST/TUPLE/SET dst elements` | 集合字面量 |
 | `BUILD_DICT dst key:value...` | 字典字面量 |
 | `GET_ITEM dst container index` / `SET_ITEM container index src` | 下标读写 |
@@ -118,16 +123,18 @@ HIR 是 AST 与字节码之间的**线性寄存器中间表示**：
   lambda 内引用外层局部时生成 `LOAD_OUTER depth slot`，`depth` 为按 lowering
   函数栈计算出的跨帧数。写入外层可变局部（`var`）生成 `STORE_OUTER`；外层
   `val`/参数写入在 lowering 阶段拒绝。
-- 闭包采用**帧捕获**而非 cell/upvalue 元数据：lambda 值持有定义时的 VM
-  帧，帧再指向其外层帧；`LOAD_OUTER`/`STORE_OUTER` 沿该链访问寄存器。
+- 闭包采用**帧 + 局部 cell**：VM 仅在含 `MAKE_CLOSURE` 的函数中把局部槽
+  表示为 cell；闭包捕获一份 cell 引用快照，外层变量共享同一 cell，循环变量与
+  循环体内声明的局部变量每轮由 `FRESH_LOCALS` 换成新 cell，因此每个迭代闭包
+  持有独立绑定。`LOAD_OUTER`/`STORE_OUTER` 沿帧链解引用 cell。
 - loop lowering 维护 `(continue_label, break_label, result_reg)` 栈：
   `continue` 跳到下一轮，`break` 跳到循环结束；带值 `break` 先 `MOVE` 到
   循环结果寄存器，保持循环表达式的值语义。
 - 寄存器单调分配，不复用；上限 256（与设计 02 的 A/B/C 8 位字段一致）。
   超过上限报 `UnsupportedSyntax`。后续由寄存器分配器复用临时值。
 - `for` 循环变量按局部槽处理；多变量 `for` 用 `UNPACK` 把 Tuple/List 元素
-  写入连续槽。循环体复用同一帧，因此循环内创建 lambda/嵌套函数会共享最后一次
-  迭代的绑定；第一切片在 lowering 阶段显式拒绝这种写法。
+  写入连续槽。循环体仍复用同一帧，但循环作用域内声明的槽在每轮开始时通过
+  `FRESH_LOCALS` 换成新 cell，使迭代闭包捕获本轮值。
 
 ## 5. 函数与调用
 
@@ -196,15 +203,21 @@ dump 用于调试。
   `MAKE_CLOSURE`（ABx：proto 索引）。lambda proto 与顶层函数共用
   `BytecodeModule.functions`，由 `is_lambda` 仅在 HIR 层区分。
 - 多变量 `for` 用 `UNPACK`（ABC：source、目标起始槽、变量数）；VM 校验元素为
-  Tuple/List 且数量匹配，否则报与解释器相同的错误。
-- 类用 `BUILD_CLASS`（ABx：常量池中的 `ClassSpec`）。基类寄存器先 MOVE 到
-  scratch 区（`Proto.scratch_base`），`ClassSpec` 记录类名、基类数量、实例方法
-  `(name, proto)` 表、类方法 `(name, proto)` 表、运算符
-  `(symbol, operand_count, proto)` 表与槽 `(name, mutable, initializer proto?)`
-  表；方法 proto 以 `has_this` 标记，参数表包含 `this`。类方法写入元类字段，
-  实例方法写入类字段；运算符方法写入 `OortType.operators`。
+  Tuple/List 且数量匹配，否则报与解释器相同的错误。`FRESH`（ABx：槽元组）
+  在每轮替换 cell。
+- 类用 `BUILD_CLASS`（ABx：常量池中的 `ClassSpec`）。基类寄存器与可选元类
+  先 MOVE 到 scratch 区（`Proto.scratch_base`），`ClassSpec` 记录类名、基类
+  数量、是否带元类、实例方法 `(name, proto)` 表、类方法 `(name, proto)` 表、
+  运算符 `(symbol, operand_count, proto)` 表与槽
+  `(name, mutable, initializer proto?)` 表；方法 proto 以 `has_this` 标记，
+  参数表包含 `this`。类方法写入元类字段，实例方法写入类字段；运算符方法写入
+  `OortType.operators`。`SUPER` 基于当前方法的 `defining_type` 创建代理。
+- 扩展用 `REGISTER_EXT`（ABx：常量池中的 `ExtensionSpec` + receiver 寄存器）
+  在当前帧的扩展作用域注册方法或运算符；VM 的属性/运算符回退使用该词法
+  作用域，并在 `IMPORT` 时激活被导入模块的顶层扩展。
 - `Proto.signature` 保存 `SignatureSpec`：参数种类、槽、默认值 proto 索引与
-  `has_this`。`CALL` 保持 `A=base, C=位置参数数`；`CALL_KW A Bx=K(CallSpec)`
+  `has_this`；`Proto.local_count`/`uses_cells` 决定该帧是否使用局部 cell。
+  `CALL` 保持 `A=base, C=位置参数数`；`CALL_KW A Bx=K(CallSpec)`
   的 scratch 布局为 callee、位置值、关键字值、块值。反汇编显示
   `CALL_KW R6 pos=1 kws=(c)`。
 - 枚举用 `BUILD_ENUM`（ABx：`EnumSpec`）；`match` 用 `MATCH`（ABx：`MatchSpec`，
@@ -227,16 +240,19 @@ dump 用于调试。
 - `runtime/bytecode_vm.py`：Python 调用栈帧、寄存器数组、常量/字节码解码缓存、
   全局名缓存；复用现有 `Environment`、内建环境、类型对象、运算符调度和
   迭代器协议。第一切片现已覆盖集合字面量、内建容器下标/切片与属性读写。
-- 每次调用创建带 `parent` 的 `VMFrame`；`OortVMClosure` 保存 proto 与定义帧。
-  顶层函数由 `DEF_FUN` 创建且不捕获帧；lambda 由 `MAKE_CLOSURE` 捕获当前帧。
-  `LOAD_OUTER`/`STORE_OUTER` 沿帧链读写外层寄存器，闭包内的赋值直接修改外层
-  已捕获的寄存器。
+- 每次调用创建带 `parent` 与扩展作用域 `ext_env` 的 `VMFrame`；`OortVMClosure`
+  保存 proto、定义帧与定义时的扩展作用域。顶层函数由 `DEF_FUN` 创建且不捕获
+  帧；lambda/嵌套函数由 `MAKE_CLOSURE` 捕获当前帧的局部 cell 快照。
+  `LOAD_OUTER`/`STORE_OUTER` 沿帧链读写 cell。
 - VM 闭包是一等值：可作为参数/返回值、放入集合、经下标或嵌套调用发起调用；
   原生高阶助手通过 `interpreter.call_value` 的 `OortVMInvokable` 分支回调 VM。
-- `BUILD_CLASS` 调用 `OortType.create_type_object` 并写入方法闭包；属性查找把
+- `BUILD_CLASS` 调用 `OortType.create_type_object`（含元类）并写入方法/类方法/
+  运算符闭包；闭包记录 `defining_type` 供 `SUPER` 使用。属性查找把
   `OortVMInvokable` 绑定为 `OortVMMethod`（自动前置 `this`）。构造仍走
   `OortType.__call__`：`__init__` 若是 VM 方法则通过 `bind(instance)` 调用，
   因此类可作为 `map` 等原生助手的回调。
+- 扩展方法/运算符注册到当前 `VMFrame.ext_env`；属性、下标与二元/一元运算的
+  回退查询都显式传入该作用域，导入模块的顶层扩展在 `IMPORT` 时激活。
 - 参数绑定由 `runtime/call_protocol.py` 的共享核心完成；VM 与 AST 解释器
   共用错误规则。VM 默认值经默认 proto 闭包求值（按闭包缓存），`*args`
   为 Tuple、`**kwargs` 为 Dict、缺失块为 `null`；原生函数仍只接受位置实参。
@@ -256,7 +272,7 @@ dump 用于调试。
 
 ## 9. 下一步
 
-1. 继续扩大 HIR/VM 子集：循环内创建闭包、元类/`super`、扩展方法与扩展运算符。
+1. 完成剩余显式拒绝项：调用侧 `*`/`**`、`match` arm 内控制流、类体成员默认值等。
 2. 扩大差分/错误路径测试，覆盖更多动态示例与边界组合。
 3. 评估把 CLI 默认后端切到 VM（先做性能与兼容性基线）。
 4. 继续优化：寄存器复用、常量内联、当前帧内联、类型特化；用基准证明。

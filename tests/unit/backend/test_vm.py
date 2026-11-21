@@ -345,6 +345,78 @@ val c = C()
 c.n += 4
 print(x, xs, c.n)
 """,
+    """\
+class Shape {
+    def __init__(name) { this.name = name }
+    def area: 0
+}
+class Rect < Shape {
+    def __init__(w, h) {
+        super.__init__("rect")
+        this.w = w
+        this.h = h
+    }
+    def area: this.w * this.h
+}
+class M < Type {}
+class Tagged :: M {}
+class Box < Rect :: M {
+    def area: super.area() * 2
+}
+print(Rect(3, 4).name, Rect(3, 4).area(), Box(2, 3).area())
+print(type(Tagged))
+""",
+    """\
+class Counter {
+    def __init__(start) { this.n = start }
+    def increment { this.n = this.n + 1 }
+}
+def Counter.bump {
+    this.increment()
+    this.increment()
+    this
+}
+def Int.twice: this * 2
+def String.operator "**"(times) {
+    var result = ""
+    var i = 0
+    while i < times {
+        result = result + this
+        i = i + 1
+    }
+    result
+}
+def String.tag: "outer"
+def scoped() {
+    def String.tag: "inner"
+    "x".tag()
+}
+print(Counter(1).bump().n, 3.twice(), "ab" ** 2)
+print("x".tag(), scoped())
+""",
+    """\
+var total = 0
+var fs = []
+for i in [1, 2, 3] {
+    var scaled = i * 10
+    fs = fs + [do: { total = total + scaled
+    total }]
+}
+print(fs[0](), fs[0](), fs[1](), fs[2](), total)
+
+def make() {
+    var out = []
+    var n = 0
+    while n < 2 {
+        var captured = n
+        out = out + [do: captured]
+        n = n + 1
+    }
+    out
+}
+var made = make()
+print(made[0](), made[1]())
+""",
 ]
 
 
@@ -469,6 +541,19 @@ print(math.sqrt(9))
     assert out == "1 2 2\n3.0\n"
 
 
+def test_vm_activates_imported_extensions(tmp_path, run_file):
+    (tmp_path / "lib.ort").write_text(
+        "def Int.triple: this * 3\n",
+        encoding="utf-8",
+    )
+    main = tmp_path / "main.ort"
+    main.write_text(
+        'import "./lib"\nprint(3.triple())\n',
+        encoding="utf-8",
+    )
+    assert run_file(main, target="vm").stdout == "9\n"
+
+
 def test_vm_hoists_imports(tmp_path, run_file):
     (tmp_path / "dep.ort").write_text('print("dep")\n', encoding="utf-8")
     main = tmp_path / "main.ort"
@@ -557,11 +642,6 @@ def test_vm_reports_duplicate_block(caplog: pytest.LogCaptureFixture):
 
 
 def test_vm_reports_closure_errors(caplog: pytest.LogCaptureFixture):
-    compiler = get_compiler(["NOT_EXIST", "-t", "vm"])
-    with pytest.raises(CompilerError):
-        compiler.run_string("while false { val f = do: 1 }\n")
-    assert "lambdas created inside loops" in caplog.text
-
     compiler = get_compiler(["NOT_EXIST", "-t", "vm"])
     with pytest.raises(CompilerError):
         compiler.run_string("val f = do(x): x\nf()\n")

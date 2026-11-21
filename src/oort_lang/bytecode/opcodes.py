@@ -78,6 +78,9 @@ class Op(IntEnum):
     MATCH = 65
     CALL_KW = 66
     UNPACK = 67
+    FRESH = 68
+    SUPER = 69
+    REGISTER_EXT = 70
 
     EXTEND = 47
 
@@ -141,6 +144,9 @@ OP_FORMAT: dict[Op, str] = {
     Op.MATCH: _FORMAT_ABX,
     Op.CALL_KW: _FORMAT_ABX,
     Op.UNPACK: _FORMAT_ABC,
+    Op.FRESH: _FORMAT_ABX,
+    Op.SUPER: _FORMAT_ABC,
+    Op.REGISTER_EXT: _FORMAT_ABX,
     Op.EXTEND: _FORMAT_AX,
 }
 

@@ -562,6 +562,8 @@ class ASTInterpreter(ASTVisitor[OortObject]):
         value: OortObject,
         name: str,
         position: SourcePosition,
+        *,
+        env: Environment | None = None,
     ) -> OortObject:
         """Resolve an attribute on an already-evaluated value."""
         result = value.get(name)
@@ -584,7 +586,7 @@ class ASTInterpreter(ASTVisitor[OortObject]):
             if slot is not None and name not in value.fields:
                 raise OortAttributeError(f"Slot {name!r} is not initialized", position)
 
-        lookup = self.env.lookup_extension(value.type, name)
+        lookup = (env or self.env).lookup_extension(value.type, name)
         if lookup.ambiguous:
             raise OortAttributeError(self._ambiguous_extension_message(lookup), position)
         if lookup.match is not None:
@@ -615,9 +617,24 @@ class ASTInterpreter(ASTVisitor[OortObject]):
     def _ambiguous_extension_message(
         lookup: ExtensionLookup, kind: str = "method", symbol: str | None = None
     ) -> str:
-        names = sorted({match.func.closure.module_root.name for match in lookup.ambiguous})
+        def origin(func: OortObject) -> str:
+            closure = getattr(func, "closure", None)
+            if closure is not None:
+                return str(closure.module_root.name)
+            env = getattr(func, "env", None)
+            if env is not None:
+                return str(env.module_root.name)
+            return "<vm>"
+
+        def label_of(func: OortObject) -> str:
+            proto = getattr(func, "proto", None)
+            if proto is not None:
+                return str(proto.name)
+            return str(getattr(func, "name", "<function>"))
+
+        names = sorted({origin(match.func) for match in lookup.ambiguous})
         target = lookup.ambiguous[0].target.name
-        label = symbol if symbol is not None else lookup.ambiguous[0].func.name
+        label = symbol if symbol is not None else label_of(lookup.ambiguous[0].func)
         origins = " and ".join(repr(origin) for origin in names)
         return (
             f"Ambiguous extension {kind} {label!r} for type {target!r}: candidates from {origins}."
@@ -628,10 +645,12 @@ class ASTInterpreter(ASTVisitor[OortObject]):
         value: OortObject,
         index: OortObject,
         position: SourcePosition,
+        *,
+        env: Environment | None = None,
     ) -> OortObject:
         """Read `value[index]`, honouring user `operator "[]"` methods."""
         if isinstance(value, OortInstance) and not isinstance(value, OortType):
-            method = self._find_operator(value, "[]", 2, position)
+            method = self._find_operator(value, "[]", 2, position, env=env)
             if method is None:
                 raise OortTypeError(
                     f"Type {value.type.name!r} does not support subscripting "
@@ -651,10 +670,12 @@ class ASTInterpreter(ASTVisitor[OortObject]):
         index: OortObject,
         item: OortObject,
         position: SourcePosition,
+        *,
+        env: Environment | None = None,
     ) -> None:
         """Write `value[index] = item`, honouring user `operator "[]="` methods."""
         if isinstance(value, OortInstance) and not isinstance(value, OortType):
-            method = self._find_operator(value, "[]=", 3, position)
+            method = self._find_operator(value, "[]=", 3, position, env=env)
             if method is None:
                 raise OortTypeError(
                     f"Type {value.type.name!r} does not support subscript "
@@ -719,13 +740,15 @@ class ASTInterpreter(ASTVisitor[OortObject]):
         symbol: str,
         operand_count: int,
         position: SourcePosition,
+        *,
+        env: Environment | None = None,
     ):
         """Find an operator method for `receiver`, then an extension operator."""
         method = _get_operator_from_cls(symbol, operand_count, receiver.type, receiver)
         if method is not None:
             return method
 
-        lookup = self.env.lookup_extension_operator(receiver.type, symbol, operand_count)
+        lookup = (env or self.env).lookup_extension_operator(receiver.type, symbol, operand_count)
         if lookup.ambiguous:
             raise OortTypeError(
                 self._ambiguous_extension_message(lookup, "operator", symbol),
@@ -757,6 +780,8 @@ class ASTInterpreter(ASTVisitor[OortObject]):
         lhs: OortObject,
         rhs: OortObject,
         position: SourcePosition | None = None,
+        *,
+        env: Environment | None = None,
     ) -> OortObject:
         """Apply a binary operator using an already-resolved source position."""
         position = position or self._builtin_position()
@@ -769,9 +794,9 @@ class ASTInterpreter(ASTVisitor[OortObject]):
 
         # Membership dispatches to the container (the right operand).
         if op_text in ("in", "!in"):
-            method = self._find_operator(rhs, op_text, 2, position)
+            method = self._find_operator(rhs, op_text, 2, position, env=env)
             if method is None and op_text == "!in":
-                method = self._find_operator(rhs, "in", 2, position)
+                method = self._find_operator(rhs, "in", 2, position, env=env)
                 if method is not None:
                     result = self._invoke_operator(method, [lhs], "in", position)
                     return OortBool.get_bool_value(not _is_truthy(result))
@@ -782,10 +807,10 @@ class ASTInterpreter(ASTVisitor[OortObject]):
             result = self._invoke_operator(method, [lhs], op_text, position)
             return OortBool.get_bool_value(_is_truthy(result))
 
-        method = self._find_operator(lhs, op_text, 2, position)
+        method = self._find_operator(lhs, op_text, 2, position, env=env)
         if method is None and op_text == "!=":
             # `!=` defaults to the negation of `==`.
-            method = self._find_operator(lhs, "==", 2, position)
+            method = self._find_operator(lhs, "==", 2, position, env=env)
             if method is not None:
                 result = self._invoke_operator(method, [rhs], "==", position)
                 return OortBool.get_bool_value(not _is_truthy(result))
@@ -808,13 +833,15 @@ class ASTInterpreter(ASTVisitor[OortObject]):
         op_text: str,
         operand: OortObject,
         position: SourcePosition | None = None,
+        *,
+        env: Environment | None = None,
     ) -> OortObject:
         """Apply a unary operator using an already-resolved source position."""
         position = position or self._builtin_position()
         if op_text == "not":
             return OortBool.get_bool_value(not _is_truthy(operand))
 
-        method = self._find_operator(operand, op_text, 1, position)
+        method = self._find_operator(operand, op_text, 1, position, env=env)
         if method is None:
             raise OortTypeError(
                 f"Type {operand.type.name!r} does not support operator {op_text!r}", position

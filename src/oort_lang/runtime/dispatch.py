@@ -44,19 +44,23 @@ def _get_operator_from_cls(
 
 
 def _bind_extension_method(
-    receiver: "OortObject", func: OortFunction, defining_type: "OortType"
-) -> OortMethod:
+    receiver: "OortObject", func: "OortObject", defining_type: "OortType"
+) -> "OortObject":
     """Bind an extension function to a receiver as a method.
 
     `defining_type` is the type the extension matched on (not necessarily the
     receiver's dynamic type); `super` resumes after that type.
     """
-    return OortMethod(
-        this=receiver,
-        node=func.node,
-        closure=func.closure,
-        defining_type=defining_type,
-    )
+    if isinstance(func, OortVMInvokable):
+        return func.bind(receiver)
+    if isinstance(func, OortFunction):
+        return OortMethod(
+            this=receiver,
+            node=func.node,
+            closure=func.closure,
+            defining_type=defining_type,
+        )
+    raise TypeError(f"Extension {func!r} is not callable")
 
 
 def _get_from_cls(name: str, start_type: "OortType", receiver: "OortObject") -> "OortObject | None":

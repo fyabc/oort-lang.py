@@ -13,6 +13,7 @@ from .nodes import (
     BuildTuple,
     Call,
     DefineFunction,
+    FreshLocals,
     GetAttr,
     GetItem,
     HirFunction,
@@ -33,12 +34,14 @@ from .nodes import (
     Match,
     Move,
     OpenIterator,
+    RegisterExtension,
     Return,
     SetAttr,
     SetItem,
     StoreGlobal,
     StoreLocal,
     StoreOuter,
+    SuperProxy,
     UnOp,
     Unpack,
 )
@@ -51,6 +54,9 @@ def format_instruction(instruction: Instruction) -> str:
         return f"LOAD_L R{instruction.dst} slot{instruction.slot}"
     if isinstance(instruction, StoreLocal):
         return f"STORE_L slot{instruction.slot} R{instruction.src}"
+    if isinstance(instruction, FreshLocals):
+        slots = ", ".join(f"slot{slot}" for slot in instruction.slots)
+        return f"FRESH_LOCALS ({slots})"
     if isinstance(instruction, LoadOuter):
         return f"LOAD_OUTER R{instruction.dst} depth={instruction.depth} slot={instruction.slot}"
     if isinstance(instruction, StoreOuter):
@@ -72,9 +78,10 @@ def format_instruction(instruction: Instruction) -> str:
             for name, _, index in instruction.slots
         )
         method_text = " ".join(part for part in (methods, class_methods, operators) if part)
+        meta = "" if instruction.metaclass is None else f" metaclass=R{instruction.metaclass}"
         return (
             f"BUILD_CLASS R{instruction.dst} {instruction.name} bases=({bases}) "
-            f"{method_text} slots=({slots})"
+            f"{method_text} slots=({slots}){meta}"
         )
     if isinstance(instruction, BuildEnum):
         ctors = ", ".join(f"{name}/{arity}" for name, arity in instruction.constructors)
@@ -126,6 +133,18 @@ def format_instruction(instruction: Instruction) -> str:
         )
     if isinstance(instruction, GetAttr):
         return f"GET_ATTR R{instruction.dst} R{instruction.value}.{instruction.name}"
+    if isinstance(instruction, SuperProxy):
+        return f"SUPER R{instruction.dst} R{instruction.receiver}"
+    if isinstance(instruction, RegisterExtension):
+        if instruction.symbol is not None:
+            return (
+                f"REGISTER_EXT R{instruction.receiver} operator {instruction.symbol!r}/"
+                f"{instruction.operand_count} proto[{instruction.function_index}]"
+            )
+        return (
+            f"REGISTER_EXT R{instruction.receiver} {instruction.name} "
+            f"proto[{instruction.function_index}]"
+        )
     if isinstance(instruction, SetAttr):
         return f"SET_ATTR R{instruction.value}.{instruction.name} = R{instruction.src}"
     if isinstance(instruction, GetItem):

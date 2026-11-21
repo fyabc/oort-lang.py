@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from .functions import OortFunction
     from .objects import OortObject
     from .type_system import OortType
 
@@ -39,7 +38,7 @@ class ExtensionMatch:
     """One extension method candidate."""
 
     target: OortType  # The MRO type the extension was defined on.
-    func: OortFunction
+    func: OortObject
 
 
 @dataclasses.dataclass(frozen=True)
@@ -78,8 +77,8 @@ class Environment:
 
         # Extension methods and operators are not values; they live in their
         # own per-scope tables and are looked up lexically at the use site.
-        self.extensions: dict[tuple[OortType, str], OortFunction] = {}
-        self.extension_operators: dict[tuple[OortType, str, int], OortFunction] = {}
+        self.extensions: dict[tuple[OortType, str], OortObject] = {}
+        self.extension_operators: dict[tuple[OortType, str, int], OortObject] = {}
         # Modules imported by this scope whose top-level extensions are active.
         # Only the source scope's local tables are consulted, never its own
         # imported scopes: imports are not transitive.
@@ -140,7 +139,7 @@ class Environment:
         return AssignResult.OK
 
     def register_extension(
-        self, target_type: OortType, name: str, func: OortFunction
+        self, target_type: OortType, name: str, func: OortObject
     ) -> DefineResult:
         """Register a local extension method in this scope."""
         return self._register_extension_in(self.extensions, (target_type, name), func)
@@ -150,7 +149,7 @@ class Environment:
         target_type: OortType,
         symbol: str,
         operand_count: int,
-        func: OortFunction,
+        func: OortObject,
     ) -> DefineResult:
         """Register a local extension operator in this scope."""
         return self._register_extension_in(
@@ -158,7 +157,7 @@ class Environment:
         )
 
     def _register_extension_in(
-        self, table: dict[Any, OortFunction], key: tuple[Any, ...], func: OortFunction
+        self, table: dict[Any, OortObject], key: tuple[Any, ...], func: OortObject
     ) -> DefineResult:
         if key in table and not self.allow_redefine:
             return DefineResult.REDEFINED
@@ -182,7 +181,7 @@ class Environment:
 
     @staticmethod
     def _nearest_in(
-        table: Mapping[Any, OortFunction], receiver_type: OortType, suffix: tuple[Any, ...]
+        table: Mapping[Any, OortObject], receiver_type: OortType, suffix: tuple[Any, ...]
     ) -> tuple[int, ExtensionMatch] | None:
         """Return the most specific match and its MRO distance."""
         for index, mro_type in enumerate(receiver_type.mro()):

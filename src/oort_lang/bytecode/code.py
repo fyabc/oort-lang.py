@@ -18,6 +18,7 @@ class ClassSpec:
     slots: tuple[tuple[str, bool, int | None], ...] = ()
     class_methods: tuple[tuple[str, int], ...] = ()
     operators: tuple[tuple[str, int, int], ...] = ()
+    has_metaclass: bool = False
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -54,6 +55,16 @@ class CallSpec:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class ExtensionSpec:
+    """Constant-pool descriptor for one ``REGISTER_EXT`` instruction."""
+
+    name: str
+    function_index: int
+    symbol: str | None = None
+    operand_count: int = 0
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class ImportSpec:
     """Constant-pool descriptor for one ``IMPORT`` instruction."""
 
@@ -75,6 +86,8 @@ class Proto:
     scratch_base: int = 0
     has_this: bool = False
     signature: SignatureSpec = dataclasses.field(default_factory=lambda: SignatureSpec(()))
+    local_count: int = 0
+    uses_cells: bool = False
 
     def line_for(self, pc: int) -> int:
         if 0 <= pc < len(self.line_table):

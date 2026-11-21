@@ -94,10 +94,9 @@ P1 已完成。后续打磨（P2）：
 前置：两个方言的 v1 对象模型稳定。HIR 与 32 位字节码编码/反汇编第一切片
 已落地（线性寄存器指令、动态子集 lowering、集合/下标/切片/属性、`-t bc`/`-t vm`、
 寄存器 VM、lambda/闭包、一等函数值、动态/静态类、模块导入、core 的
-ADT/match 与完整参数绑定）。`examples/08_core` 已全部在 VM 下运行，
-`examples/` 还有循环内创建闭包、元类/`super`、扩展方法与扩展运算符等待补；
-当前 VM 已覆盖主要宏基准，但 loop 仍接近 2× 目标、完整子集相对早期切片有
-回退；最新数字见
+ADT/match 与完整参数绑定）。`examples/08_core` 与 `examples/` 已全部在 VM 下运行，包括循环内创建闭包、
+元类/`super`、扩展方法与扩展运算符；当前 VM 已覆盖主要宏基准，但 loop 仍接近
+2× 目标、完整子集相对早期切片有回退；最新数字见
 [`benchmarks/RESULTS.md`](https://github.com/fyabc/oort-lang/blob/main/benchmarks/RESULTS.md)。
 接下来继续补子集、扩大差分/错误路径覆盖，再评估默认后端切换与优化。
 

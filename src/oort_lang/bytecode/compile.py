@@ -16,6 +16,7 @@ from ..hir.nodes import (
     BuildTuple,
     Call,
     DefineFunction,
+    FreshLocals,
     GetAttr,
     GetItem,
     HirFunction,
@@ -37,12 +38,14 @@ from ..hir.nodes import (
     Move,
     OpenIterator,
     Pattern,
+    RegisterExtension,
     Return,
     SetAttr,
     SetItem,
     StoreGlobal,
     StoreLocal,
     StoreOuter,
+    SuperProxy,
     UnOp,
     Unpack,
 )
@@ -52,6 +55,7 @@ from .code import (
     CallSpec,
     ClassSpec,
     EnumSpec,
+    ExtensionSpec,
     ImportSpec,
     MatchArmSpec,
     MatchSpec,
@@ -115,6 +119,7 @@ class _ProtoCompiler:
         self.labels: dict[str, int] = {}
         self.fixups: list[_Fixup] = []
         self.scratch_base = function.local_count
+        self.uses_cells = any(isinstance(instruction, MakeClosure) for instruction in function.code)
         self.max_call_slots = max(
             (
                 1
@@ -156,7 +161,7 @@ class _ProtoCompiler:
         has_match = any(isinstance(instruction, Match) for instruction in function.code)
         class_bases = max(
             (
-                len(instruction.bases)
+                len(instruction.bases) + (1 if instruction.metaclass is not None else 0)
                 for instruction in function.code
                 if isinstance(instruction, BuildClass)
             ),
@@ -195,6 +200,8 @@ class _ProtoCompiler:
             scratch_base=self.scratch_base,
             has_this=self.function.has_this,
             signature=self.function.signature,
+            local_count=self.function.local_count,
+            uses_cells=self.uses_cells,
         )
 
     def _emit(self, instruction: Instruction) -> None:
@@ -252,6 +259,16 @@ class _ProtoCompiler:
             base = self.scratch_base
             for index, source in enumerate(instruction.bases):
                 self._word(encode_abc(Op.MOVE, base + index, source, 0), position)
+            if instruction.metaclass is not None:
+                self._word(
+                    encode_abc(
+                        Op.MOVE,
+                        base + len(instruction.bases),
+                        instruction.metaclass,
+                        0,
+                    ),
+                    position,
+                )
             spec = ClassSpec(
                 name=instruction.name,
                 base_count=len(instruction.bases),
@@ -259,6 +276,7 @@ class _ProtoCompiler:
                 slots=instruction.slots,
                 class_methods=instruction.class_methods,
                 operators=instruction.operators,
+                has_metaclass=instruction.metaclass is not None,
             )
             bx = self._constant(spec, position)
             self._word(encode_abx(Op.BUILD_CLASS, instruction.dst, bx), position)
@@ -396,6 +414,25 @@ class _ProtoCompiler:
             self._word(encode_abc(Op.MOVE, base + 1, instruction.src, 0), position)
             self._word(encode_abx(Op.SET_ATTR, base, bx), position)
             return
+        if isinstance(instruction, SuperProxy):
+            self._word(
+                encode_abc(Op.SUPER, instruction.dst, instruction.receiver, 0),
+                position,
+            )
+            return
+        if isinstance(instruction, RegisterExtension):
+            extension_spec = ExtensionSpec(
+                name=instruction.name,
+                function_index=instruction.function_index,
+                symbol=instruction.symbol,
+                operand_count=instruction.operand_count,
+            )
+            bx = self._constant(extension_spec, position)
+            self._word(
+                encode_abx(Op.REGISTER_EXT, instruction.receiver, bx),
+                position,
+            )
+            return
         if isinstance(instruction, GetItem):
             self._word(
                 encode_abc(
@@ -445,6 +482,11 @@ class _ProtoCompiler:
                 ),
                 position,
             )
+            return
+        if isinstance(instruction, FreshLocals):
+            if self.uses_cells:
+                bx = self._constant(instruction.slots, position)
+                self._word(encode_abx(Op.FRESH, 0, bx), position)
             return
         if isinstance(instruction, IteratorNext):
             if self.scratch < 1:

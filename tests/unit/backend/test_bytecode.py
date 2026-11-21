@@ -8,6 +8,7 @@ from oort_lang.bytecode import (
     CallSpec,
     ClassSpec,
     EnumSpec,
+    ExtensionSpec,
     ImportSpec,
     MatchSpec,
     Op,
@@ -154,6 +155,23 @@ print(make(1)(2))
     assert "LOAD_OUTER" in text
 
 
+def test_loop_closures_compile_with_fresh_local_cells():
+    module = compile_source(
+        """var fs = []
+for i in [1, 2] {
+    var captured = i
+    fs = fs + [do: captured]
+}
+print(fs[0](), fs[1]())
+"""
+    )
+    proto = module.main
+    assert proto.uses_cells
+    ops = {decode(word).op for word in proto.code}
+    assert Op.FRESH in ops
+    assert "FRESH" in disassemble_module(module)
+
+
 def test_classes_compile_to_build_class():
     module = compile_source(
         """class C {
@@ -202,6 +220,41 @@ print((Num(1) + Num(2)).value)
     assert [(symbol, count) for symbol, count, _ in spec.operators] == [("+", 2)]
     text = disassemble_module(module)
     assert "operator '+'" in text
+
+
+def test_metaclass_and_super_compile():
+    module = compile_source(
+        """class M < Type {}
+class Base { def name() { "base" } }
+class C < Base :: M { def name() { super.name() } }
+print(C().name())
+"""
+    )
+    spec = next(
+        value
+        for value in module.main.constants
+        if isinstance(value, ClassSpec) and value.name == "C"
+    )
+    assert spec.has_metaclass
+    ops = {decode(word).op for word in module.functions[spec.methods[0][1]].code}
+    assert Op.SUPER in ops
+
+
+def test_extensions_compile_to_registration():
+    module = compile_source(
+        """class Counter { def __init__(n) { this.n = n } }
+def Counter.bump { this.n = this.n + 1 }
+def String.operator "**"(times) { this }
+print(Counter(1).bump().n)
+"""
+    )
+    specs = [value for value in module.main.constants if isinstance(value, ExtensionSpec)]
+    assert [(spec.name, spec.symbol) for spec in specs] == [
+        ("bump", None),
+        ("operator **", "**"),
+    ]
+    text = disassemble_module(module)
+    assert "REGISTER_EXT" in text
 
 
 def test_core_class_slots_compile_to_class_spec():
