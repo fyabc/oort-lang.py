@@ -96,9 +96,10 @@ class Compiler:
             print(ast_printer.parse(ast))
             return None
 
-        if self.args.target == "bc":
+        if self.args.target in ("bc", "vm"):
             from ..bytecode import compile_module, disassemble_module
             from ..hir import lower_module
+            from ..runtime.bytecode_vm import BytecodeVM
 
             assert isinstance(ast, nodes.ModuleNode)
             try:
@@ -108,8 +109,23 @@ class Compiler:
                 self.error_handler.add(e, matched)
                 self.error_handler.report(exit_on_error=False, clear=True)
                 raise CompilerError() from None
-            print(disassemble_module(program))
-            return None
+            if self.args.target == "bc":
+                print(disassemble_module(program))
+                return None
+
+            interpreter = ASTInterpreter(self.error_handler)
+            interpreter.script_args = tuple(getattr(self.args, "script_args", ()) or ())
+            interpreter.script_path = (
+                str(input_info.module_path) if input_info.module_path is not None else None
+            )
+            try:
+                result = BytecodeVM(interpreter).run(program)
+            except OortException as e:
+                matched = self.error_handler.input_info_for(e.position) or input_info
+                self.error_handler.add(e, matched)
+                self.error_handler.report(exit_on_error=False, clear=True)
+                raise CompilerError() from None
+            return result.host_value
 
         assert self.args.target == "eval", f"Invalid target {self.args.target}"
 

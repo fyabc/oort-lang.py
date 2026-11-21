@@ -716,8 +716,15 @@ class ASTInterpreter(ASTVisitor[OortObject]):
             raise OortRuntimeError(f"{e}", position) from e
         return result
 
-    def _apply_binary(self, op_text: str, lhs: OortObject, rhs: OortObject, op_token):
-        position = SourcePosition.from_token(op_token)
+    def apply_binary(
+        self,
+        op_text: str,
+        lhs: OortObject,
+        rhs: OortObject,
+        position: SourcePosition | None = None,
+    ) -> OortObject:
+        """Apply a binary operator using an already-resolved source position."""
+        position = position or self._builtin_position()
 
         # Identity is not overloadable.
         if op_text == "is":
@@ -753,13 +760,22 @@ class ASTInterpreter(ASTVisitor[OortObject]):
             )
         return self._invoke_operator(method, [rhs], op_text, position)
 
+    def _apply_binary(self, op_text: str, lhs: OortObject, rhs: OortObject, op_token):
+        return self.apply_binary(op_text, lhs, rhs, SourcePosition.from_token(op_token))
+
     def visit_binary_expr(self, node: nodes.BinaryExpr) -> OortObject:
         lhs = node.lhs.accept(self)
         rhs = node.rhs.accept(self)
         return self._apply_binary(node.op.text, lhs, rhs, node.op)
 
-    def _apply_unary(self, op_text: str, operand: OortObject, op_token) -> OortObject:
-        position = SourcePosition.from_token(op_token)
+    def apply_unary(
+        self,
+        op_text: str,
+        operand: OortObject,
+        position: SourcePosition | None = None,
+    ) -> OortObject:
+        """Apply a unary operator using an already-resolved source position."""
+        position = position or self._builtin_position()
         if op_text == "not":
             return OortBool.get_bool_value(not _is_truthy(operand))
 
@@ -769,6 +785,9 @@ class ASTInterpreter(ASTVisitor[OortObject]):
                 f"Type {operand.type.name!r} does not support operator {op_text!r}", position
             )
         return self._invoke_operator(method, [], op_text, position)
+
+    def _apply_unary(self, op_text: str, operand: OortObject, op_token) -> OortObject:
+        return self.apply_unary(op_text, operand, SourcePosition.from_token(op_token))
 
     def visit_unary_expr(self, node: nodes.UnaryExpr) -> OortObject:
         operand = node.operand.accept(self)

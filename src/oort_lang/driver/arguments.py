@@ -9,6 +9,7 @@ COMPILER_MODE_HELPS = {
     "ast": "Print AST.",
     "astm": "Print AST with metadata.",
     "bc": "Compile to bytecode and print disassembly.",
+    "vm": "Execute the supported bytecode subset.",
     "eval": "Evaluate the AST (default).",
 }
 

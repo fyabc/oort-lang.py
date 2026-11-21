@@ -108,6 +108,7 @@ class _ProtoCompiler:
             code=tuple(self.code),
             constants=tuple(self.constants.values),
             line_table=tuple(self.lines),
+            positions=tuple(self.positions),
         )
 
     def _emit(self, instruction: Instruction) -> None:

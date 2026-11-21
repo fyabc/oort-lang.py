@@ -4,6 +4,8 @@
 
 import dataclasses
 
+from ..source.source_position import SourcePosition
+
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class Proto:
@@ -13,6 +15,7 @@ class Proto:
     code: tuple[int, ...]
     constants: tuple[object, ...]
     line_table: tuple[int, ...]
+    positions: tuple[SourcePosition, ...]
 
     def line_for(self, pc: int) -> int:
         if 0 <= pc < len(self.line_table):

@@ -38,6 +38,18 @@ def test_print_ast_target(monkeypatch, capsys):
     assert "Call" in out
 
 
+def test_vm_target_executes_supported_program(monkeypatch, capsys):
+    source = """\
+def fib(n) {
+    if n <= 1: return n
+    fib(n - 1) + fib(n - 2)
+}
+print(fib(10))
+"""
+    assert _run_cli(monkeypatch, ["-t", "vm", "-c", source]) == 0
+    assert capsys.readouterr().out == "55\n"
+
+
 def test_bytecode_target_prints_disassembly(monkeypatch, capsys):
     source = """\
 def f(a) { a + 1 }
