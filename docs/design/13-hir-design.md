@@ -26,7 +26,7 @@ HIR 是 AST 与字节码之间的**线性寄存器中间表示**：
 
 - 模块顶层 `val`/`var`、赋值、函数定义与调用；
 - `Int`/`Float`/`String`/`Bool`/`null` 字面量；
-- List/Tuple/Set/Dict 字面量、下标读取/赋值、切片（读取与赋值）；
+- List/Tuple/Set/Dict 字面量、下标读取/赋值、切片（读取与赋值）、属性读写；
 - 一元/二元运算、`and`/`or` 短路；
 - `if`/`else`、`while`、`for`（通过迭代器协议）、块作用域；
 - 模块顶层函数：位置参数、局部变量、递归、`return`。
@@ -34,7 +34,7 @@ HIR 是 AST 与字节码之间的**线性寄存器中间表示**：
 显式拒绝：
 
 - 类、enum、match、lambda/嵌套函数、扩展方法、运算符方法、泛型；
-- 属性访问、导入、关键字/默认/变长/块参数；
+- 通过属性/函数值发起的调用、导入、关键字/默认/变长/块参数；
 - `break`/`continue`、`val`/参数赋值、闭包捕获外层函数局部变量、模块级
   可变重定义（当前按不可变名处理）。
 
@@ -62,6 +62,7 @@ HIR 是 AST 与字节码之间的**线性寄存器中间表示**：
 | `BUILD_DICT dst key:value...` | 字典字面量 |
 | `GET_ITEM dst container index` / `SET_ITEM container index src` | 下标读写 |
 | `BUILD_SLICE dst start? stop? step?` | 切片对象 |
+| `GET_ATTR dst value name` / `SET_ATTR value name src` | 属性读写 |
 
 `and`/`or` 降低为 `JUMP_FALSE`/`JUMP_TRUE` + `MOVE`，保持短路和返回操作数
 本身的语义。`if`/`while` 用标签与跳转展开。
@@ -109,7 +110,8 @@ dump 用于调试。
 - 集合构造复用 scratch 区，`NEW_LIST/NEW_TUPLE/NEW_SET/NEW_DICT` 从连续寄存器
   读取元素；Dict 按 key/value 成对存储。
 - 下标用 `GET_ITEM`/`SET_ITEM`；切片用 `BUILD_SLICE`（3 位 presence 标志 +
-  scratch 寄存器）；当前只覆盖内建容器，用户下标运算符仍未进入 HIR。
+  scratch 寄存器）；属性用 `GET_ATTR`/`SET_ATTR`（名字在常量池，scratch 传
+  receiver/value）。当前只覆盖内建容器与内建属性，用户类/模块尚未进入 HIR。
 - HIR `CALL dst callee args...` 使用函数末尾的 scratch 区约定：
   `CALL A B C` 中 `R(A)` 为被调者、`R(A+1..A+C)` 为实参、结果写回 `R(A)`；
   编译器先 MOVE 到 scratch 再回写 dst。`register_count` 包含 scratch，
@@ -123,7 +125,7 @@ dump 用于调试。
 
 - `runtime/bytecode_vm.py`：Python 调用栈帧、寄存器数组、常量/字节码解码缓存、
   全局名缓存；复用现有 `Environment`、内建环境、类型对象、运算符调度和
-  迭代器协议。第一切片现已覆盖集合字面量、内建容器下标与切片。
+  迭代器协议。第一切片现已覆盖集合字面量、内建容器下标/切片与属性读写。
 - 顶层函数由 `DEF_FUN` 创建 `OortVMFunction`；VM 内调用直接进入新帧，内建函数
   仍走 `call_value`。VM 函数暂不能作为一等值传给 `map` 等原生高阶助手。
 - Int 算术/比较和一元运算有快速路径；其余类型回退到解释器的
@@ -132,6 +134,6 @@ dump 用于调试。
 
 ## 9. 下一步
 
-1. 扩大 HIR/VM 子集：属性、类/方法、模块与 core 方言。
+1. 扩大 HIR/VM 子集：函数值/lambda、类/方法、模块与 core 方言。
 2. 对 VM 与解释器做更广的差分/错误路径测试；逐步把 CLI 默认后端切到 VM。
 3. 继续优化：寄存器复用、常量内联、当前帧内联、类型特化；用基准证明。
