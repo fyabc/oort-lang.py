@@ -38,8 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `match`, `=>` and `Unit`; 0.1.2 added the first enum/match scopes.
 - Internal backend foundation: a shared linear-register HIR, a 32-bit
   bytecode compiler/disassembler and a register VM for the dynamic
-  scalar/function/loop subset. `-t bc` prints the disassembly and `-t vm`
-  executes that subset; `-t eval` remains the default backend.
+  scalar/collection/function/loop subset. `-t bc` prints the disassembly and
+  `-t vm` executes that subset; `-t eval` remains the default backend.
 - `oort-object` subscript and missing-attribute protocols (OP 0018):
   `def operator "[]"(index)` / `def operator "[]="(index, value)` for
   user-defined indexing (including slices and tuple indices), and a read-only
