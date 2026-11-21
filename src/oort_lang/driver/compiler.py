@@ -96,6 +96,21 @@ class Compiler:
             print(ast_printer.parse(ast))
             return None
 
+        if self.args.target == "bc":
+            from ..bytecode import compile_module, disassemble_module
+            from ..hir import lower_module
+
+            assert isinstance(ast, nodes.ModuleNode)
+            try:
+                program = compile_module(lower_module(ast))
+            except OortException as e:
+                matched = self.error_handler.input_info_for(e.position) or input_info
+                self.error_handler.add(e, matched)
+                self.error_handler.report(exit_on_error=False, clear=True)
+                raise CompilerError() from None
+            print(disassemble_module(program))
+            return None
+
         assert self.args.target == "eval", f"Invalid target {self.args.target}"
 
         interpreter = ASTInterpreter(self.error_handler)

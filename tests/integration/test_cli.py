@@ -38,6 +38,24 @@ def test_print_ast_target(monkeypatch, capsys):
     assert "Call" in out
 
 
+def test_bytecode_target_prints_disassembly(monkeypatch, capsys):
+    source = """\
+def f(a) { a + 1 }
+print(f(2))
+"""
+    assert _run_cli(monkeypatch, ["-t", "bc", "-c", source]) == 0
+    out = capsys.readouterr().out
+    assert "Proto <main>" in out
+    assert "Proto f" in out
+    assert "DEF_FUN" in out
+    assert "CALL" in out
+
+
+def test_bytecode_target_rejects_unsupported_syntax(monkeypatch, caplog):
+    assert _run_cli(monkeypatch, ["-t", "bc", "-c", "class C {}\n"]) != 0
+    assert "HIR backend does not support ClassDef" in caplog.text
+
+
 def test_print_ast_with_metadata(monkeypatch, capsys):
     assert _run_cli(monkeypatch, ["-t", "astm", "-c", "print(1)"]) == 0
     out = capsys.readouterr().out

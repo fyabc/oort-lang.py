@@ -1,0 +1,94 @@
+#! /usr/bin/env python
+
+"""Disassemble bytecode protos to a stable human-readable form."""
+
+from .code import BytecodeModule, Proto
+from .opcodes import Decoded, Op, decode
+
+
+def _const(proto: Proto, index: int) -> str:
+    if 0 <= index < len(proto.constants):
+        return repr(proto.constants[index])
+    return f"<bad K{index}>"
+
+
+def _format(proto: Proto, pc: int, decoded: Decoded) -> str:
+    op = decoded.op
+    if op is Op.LOAD_K:
+        return f"LOAD_K R{decoded.a} K{decoded.bx}({_const(proto, decoded.bx)})"
+    if op is Op.LOAD_L:
+        return f"LOAD_L R{decoded.a} L{decoded.b}"
+    if op is Op.STORE_L:
+        return f"STORE_L L{decoded.a} R{decoded.b}"
+    if op is Op.LOAD_G:
+        return f"LOAD_G R{decoded.a} {_const(proto, decoded.bx)}"
+    if op is Op.STORE_G:
+        return f"STORE_G R{decoded.a} {_const(proto, decoded.bx)}"
+    if op is Op.DEF_FUN:
+        return f"DEF_FUN proto[{decoded.bx}]"
+    if op is Op.MOVE:
+        return f"MOVE R{decoded.a} R{decoded.b}"
+    if op in {
+        Op.ADD,
+        Op.SUB,
+        Op.MUL,
+        Op.DIV,
+        Op.FLOORDIV,
+        Op.MOD,
+        Op.POW,
+        Op.SHL,
+        Op.SHR,
+        Op.BAND,
+        Op.BOR,
+        Op.BXOR,
+        Op.EQ,
+        Op.NE,
+        Op.LT,
+        Op.LE,
+        Op.GT,
+        Op.GE,
+        Op.IN,
+        Op.NOT_IN,
+        Op.IS,
+        Op.IS_NOT,
+    }:
+        return f"{op.name} R{decoded.a} R{decoded.b} R{decoded.c}"
+    if op in {Op.POS, Op.NEG, Op.INVERT, Op.NOT}:
+        return f"{op.name} R{decoded.a} R{decoded.b}"
+    if op is Op.JUMP:
+        return f"JUMP {pc + 1 + decoded.sbx}"
+    if op is Op.JUMP_FALSE:
+        return f"JUMP_FALSE R{decoded.a} {pc + 1 + decoded.sbx}"
+    if op is Op.JUMP_TRUE:
+        return f"JUMP_TRUE R{decoded.a} {pc + 1 + decoded.sbx}"
+    if op is Op.CALL:
+        return f"CALL R{decoded.a} nargs={decoded.c}"
+    if op is Op.RET:
+        return f"RET R{decoded.a}"
+    if op is Op.OPEN_ITER:
+        return f"OPEN_ITER R{decoded.a} R{decoded.b}"
+    if op is Op.ITER_NEXT:
+        return f"ITER_NEXT R{decoded.a} R{decoded.b} R{decoded.c}"
+    return f"{op.name} A={decoded.a} B={decoded.b} C={decoded.c}"
+
+
+def disassemble_proto(proto: Proto, prefix: str = "") -> list[str]:
+    params = ", ".join(proto.params)
+    lines = [f"{prefix}Proto {proto.name} regs={proto.register_count} params=({params})"]
+    for pc, word in enumerate(proto.code):
+        try:
+            decoded = decode(word)
+        except ValueError as exc:
+            lines.append(f"{prefix}  {pc:4d}  <decode error: {exc}>")
+            continue
+        text = _format(proto, pc, decoded)
+        lines.append(f"{prefix}  {pc:4d}  {text}  ; line {proto.line_for(pc)}")
+    return lines
+
+
+def disassemble_module(module: BytecodeModule) -> str:
+    lines = disassemble_proto(module.main)
+    for index, proto in enumerate(module.functions):
+        lines.append("")
+        lines.extend(disassemble_proto(proto, prefix=f"[{index}] "))
+    return "\n".join(lines)
