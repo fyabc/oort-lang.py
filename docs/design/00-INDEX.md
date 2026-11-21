@@ -22,12 +22,13 @@
 | [10-category-theory-notes.md](10-category-theory-notes.md) | 范畴论在编译器中的应用笔记 |
 | [11-latest-research-2025.md](11-latest-research-2025.md) | 2025–2026 年语言设计前沿调研 |
 | [12-host-boundary.md](12-host-boundary.md) | 宿主边界、HostBridge、原生调用模式与 Rust 迁移 |
+| [13-hir-design.md](13-hir-design.md) | 共享 HIR：线性寄存器指令、lowering 范围、作用域与下一步 |
 
 ## 使用注意
 
 本目录是**设计讨论**，不是规范。部分文档描述的是尚未实现或已放弃的方案：
 
-1. 字节码设计（02）没有对应实现；旧原型因静默错误已删除。
+1. HIR 第一切片已实现（13）；字节码编码与 VM（02）仍无实现，旧原型因静默错误已删除。
 2. 宏系统（05）与 `comptime` 尚未实现，属于最晚期特性。
 3. 类型系统（03）描述的是目标设计；当前动态方言不检查类型。
 4. 文档中的示例使用 Oort 注释语法 `#`；保留的 `//` 只出现在 TypeScript 等对比代码中。

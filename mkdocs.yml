@@ -106,6 +106,7 @@ nav:
       - 范畴论笔记: design/10-category-theory-notes.md
       - 2025 研究: design/11-latest-research-2025.md
       - 宿主边界: design/12-host-boundary.md
+      - HIR 设计: design/13-hir-design.md
   - 实现:
       - 实现笔记: implementation/index.md
       - 参考资料: implementation/00-references.md
