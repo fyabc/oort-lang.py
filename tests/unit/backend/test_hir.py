@@ -265,6 +265,40 @@ def f(e: E) -> Int {
         )
 
 
+def test_nested_functions_lower_to_closures():
+    module = lower(
+        """def outer() {
+    var n = 0
+    def add(step = 1) {
+        n = n + step
+        n
+    }
+    add
+}
+print(outer()())
+"""
+    )
+    outer = next(function for function in module.functions if function.name == "outer")
+    closures = [i for i in outer.code if isinstance(i, MakeClosure)]
+    assert len(closures) == 1
+    nested = module.functions[closures[0].function_index]
+    assert nested.name == "add"
+    assert nested.params == ("step",)
+    assert nested.signature.params[0].default_index is not None
+    assert any(isinstance(i, StoreLocal) for i in outer.code)
+
+
+def test_nested_functions_inside_loops_are_rejected():
+    source = """def outer() {
+    for i in [1] {
+        def f() { i }
+    }
+}
+"""
+    with pytest.raises(UnsupportedSyntax, match="inside loops"):
+        lower_module(build_ast(source))
+
+
 def test_signatures_and_default_protos_lower():
     module = lower(
         """def f(a, b = a + 1, /, c = 2, *args, d, e = 3, **kwargs, &block) {
@@ -371,10 +405,6 @@ print(true or false)
     ("source", "detail"),
     [
         ("for a, b in [1] { print(a) }\n", "multiple loop"),
-        (
-            "def f() {\n    def g() { 1 }\n    g()\n}\nf()\n",
-            "nested function",
-        ),
         ("var x = 1\nx += 1\n", "augmented assignment"),
         ("...\n", "ellipsis"),
         ("val d = {: **other :}\n", "dict unpacking"),

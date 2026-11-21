@@ -409,6 +409,47 @@ class HirLowerer:
         self._emit(Match(node.position, dst, scrutinee, tuple(arms)))
         return dst
 
+    def _lower_nested_function(self, node: nodes.FunctionDef) -> int:
+        self._validate_top_level_function(node)
+        if self.state.loop_depth:
+            self._reject(
+                node,
+                "nested function definitions inside loops "
+                "(per-iteration capture is not implemented)",
+            )
+        slot = self._declare_local(
+            node.name,
+            mutable=False,
+            position=node.name_position,
+        )
+        index = self._reserve_function_index()
+        names, signature = self._lower_signature(node, anonymous=False, start_slot=0)
+        state = _FunctionState(name=node.name, code=[], scopes=[{}])
+        self._states.append(state)
+        try:
+            self._declare_signature_params(
+                names,
+                node,
+                anonymous=False,
+                start_slot=0,
+            )
+            self._lower_function_body(node)
+            result = HirFunction(
+                name=node.name,
+                params=names,
+                local_count=state.max_reg,
+                code=tuple(state.code),
+                position=node.position,
+                signature=signature,
+            )
+        finally:
+            self._states.pop()
+        self._function_slots[index] = result
+        dst = self._alloc(node.position)
+        self._emit(MakeClosure(node.position, dst, index))
+        self._emit(StoreLocal(node.name_position, slot, dst))
+        return dst
+
     def _lower_lambda(self, node: nodes.FunctionDef) -> int:
         if self.state.loop_depth:
             self._reject(
@@ -576,7 +617,7 @@ class HirLowerer:
         if isinstance(node, nodes.FunctionDef):
             if node.is_lambda:
                 return self._lower_expr(node)
-            self._reject(node, "nested function definitions")
+            return self._lower_nested_function(node)
         return self._lower_expr(node)
 
     def _lower_var_decl(self, node: nodes.VarDecl) -> int | None:

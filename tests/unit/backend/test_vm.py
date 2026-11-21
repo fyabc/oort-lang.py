@@ -221,6 +221,39 @@ var early = while true { break 5 }
 print(early)
 """,
     """\
+def makeCounter {
+    var i = 0
+    def count {
+        i = i + 1
+        print(i)
+    }
+    count
+}
+var counter = makeCounter()
+counter()
+counter()
+
+def make(step = 1) {
+    var total = 0
+    def add(n = 2) {
+        total = total + n * step
+        total
+    }
+    add
+}
+val f = make(3)
+print(f(), f(4))
+
+def outer() {
+    def fact(n) {
+        if n <= 1 { return 1 }
+        n * fact(n - 1)
+    }
+    fact
+}
+print(outer()(5))
+""",
+    """\
 def f(a, b = a + 1, /, c = 2, *args, d, e = 3, **kwargs) {
     print(a, b, c, args, d, e, kwargs)
 }
@@ -531,5 +564,5 @@ def test_vm_reports_class_errors(caplog: pytest.LogCaptureFixture):
 def test_vm_rejects_unsupported_constructs(caplog: pytest.LogCaptureFixture):
     compiler = get_compiler(["NOT_EXIST", "-t", "vm"])
     with pytest.raises(CompilerError):
-        compiler.run_string("def f() { def g() { 1 } }\nf()\n")
-    assert "HIR backend does not support nested function definitions" in caplog.text
+        compiler.run_string("var x = 1\nx += 1\n")
+    assert "HIR backend does not support augmented assignment" in caplog.text
