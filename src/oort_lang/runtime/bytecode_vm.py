@@ -110,8 +110,13 @@ class OortVMClosure(OortVMInvokable, OortObject):
         args: list[OortObject],
         position: SourcePosition | None = None,
     ) -> OortObject:
-        evaluated = [EvaluatedArg(value) for value in args]
-        return self._invoke_evaluated(evaluated, None, position)
+        interpreter = self.vm.interpreter
+        previous = interpreter._current_method
+        interpreter._current_method = self
+        try:
+            return self.vm.invoke_positional_closure(self, args, None, position)
+        finally:
+            interpreter._current_method = previous
 
     def invoke_as_method(
         self,
@@ -119,8 +124,13 @@ class OortVMClosure(OortVMInvokable, OortObject):
         args: list[OortObject],
         position: SourcePosition | None = None,
     ) -> OortObject:
-        evaluated = [EvaluatedArg(value) for value in args]
-        return self._invoke_evaluated(evaluated, this, position)
+        interpreter = self.vm.interpreter
+        previous = interpreter._current_method
+        interpreter._current_method = self
+        try:
+            return self.vm.invoke_positional_closure(self, args, this, position)
+        finally:
+            interpreter._current_method = previous
 
     def invoke_evaluated(
         self,
@@ -198,6 +208,46 @@ class BytecodeVM:
     # Frames and dispatch
     # ------------------------------------------------------------------
 
+    def invoke_positional_closure(
+        self,
+        closure: OortVMClosure,
+        args: list[OortObject],
+        this: OortObject | None,
+        position: SourcePosition | None,
+    ) -> OortObject:
+        signature = closure.proto.signature
+        params = signature.params
+        if len(args) == len(params) and all(
+            param.kind in (ParamKind.POS_ONLY, ParamKind.POS_OR_KW) and not param.has_default
+            for param in params
+        ):
+            if signature.has_this and this is None:
+                raise OortTypeError(
+                    f"Method {closure.proto.name!r} requires a receiver.",
+                    position
+                    or (
+                        closure.proto.positions[0]
+                        if closure.proto.positions
+                        else _fallback_position()
+                    ),
+                )
+            registers = [self.interpreter.runtime.null for _ in range(closure.proto.register_count)]
+            if signature.has_this:
+                assert this is not None
+                registers[0] = this
+            for param, value in zip(params, args, strict=True):
+                registers[param.slot] = value
+            return self._execute(
+                closure.module,
+                closure.proto,
+                None,
+                closure.frame,
+                closure.env,
+                registers=registers,
+            )
+        evaluated = [EvaluatedArg(value) for value in args]
+        return self.invoke_evaluated_closure(closure, evaluated, position, this)
+
     def invoke_evaluated_closure(
         self,
         closure: OortVMClosure,
@@ -225,6 +275,28 @@ class BytecodeVM:
         error_position = position or (
             closure.proto.positions[0] if closure.proto.positions else _fallback_position()
         )
+        params = signature.params
+        if (
+            len(args) == len(params)
+            and all(arg.kind is ArgKind.POSITIONAL for arg in args)
+            and all(
+                param.kind in (ParamKind.POS_ONLY, ParamKind.POS_OR_KW) and not param.has_default
+                for param in params
+            )
+        ):
+            if signature.has_this and this is None:
+                raise OortTypeError(
+                    f"Method {closure.proto.name!r} requires a receiver.",
+                    error_position,
+                )
+            fast_values: dict[int, OortObject] = {}
+            if signature.has_this:
+                assert this is not None
+                fast_values[0] = this
+            for param, arg in zip(params, args, strict=True):
+                fast_values[param.slot] = arg.value
+            return fast_values
+
         try:
             plan = bind_arguments(signature, args, closure.proto.name)
         except ArgumentBindingError as exc:
@@ -298,17 +370,18 @@ class BytecodeVM:
         self,
         module: BytecodeModule,
         proto: Proto,
-        bound_values: dict[int, OortObject],
+        bound_values: dict[int, OortObject] | None,
         parent_frame: VMFrame | None = None,
         env: Environment | None = None,
+        *,
+        registers: list[OortObject] | None = None,
     ) -> OortObject:
         if env is None:
             env = self.globals
-        registers: list[OortObject] = [
-            self.interpreter.runtime.null for _ in range(proto.register_count)
-        ]
-        for slot, value in bound_values.items():
-            registers[slot] = value
+        if registers is None:
+            registers = [self.interpreter.runtime.null for _ in range(proto.register_count)]
+            for slot, value in (bound_values or {}).items():
+                registers[slot] = value
         frame = VMFrame(registers, parent_frame)
         constants = proto.constants
         instructions = self._decoded(proto)
@@ -613,8 +686,12 @@ class BytecodeVM:
                 pc += 1
             elif op is Op.CALL:
                 callee = registers[a]
-                call_args = [EvaluatedArg(registers[a + 1 + index]) for index in range(c)]
-                registers[a] = self._call(callee, call_args, position)
+                positional_values = [registers[a + 1 + index] for index in range(c)]
+                registers[a] = self._call_positional(
+                    callee,
+                    positional_values,
+                    position,
+                )
                 pc += 1
             elif op is Op.CALL_KW:
                 spec = constants[decoded.bx]
@@ -622,12 +699,12 @@ class BytecodeVM:
                     raise OortTypeError("Invalid call descriptor in bytecode.", position)
                 call_base = a
                 callee = registers[call_base]
-                call_args = [
+                evaluated_args = [
                     EvaluatedArg(registers[call_base + 1 + index])
                     for index in range(spec.positional_count)
                 ]
                 kw_base = call_base + 1 + spec.positional_count
-                call_args.extend(
+                evaluated_args.extend(
                     EvaluatedArg(
                         registers[kw_base + index],
                         ArgKind.KEYWORD,
@@ -636,13 +713,17 @@ class BytecodeVM:
                     for index, keyword in enumerate(spec.keywords)
                 )
                 if spec.has_block:
-                    call_args.append(
+                    evaluated_args.append(
                         EvaluatedArg(
                             registers[kw_base + len(spec.keywords)],
                             ArgKind.BLOCK,
                         )
                     )
-                registers[call_base] = self._call(callee, call_args, position)
+                registers[call_base] = self._call(
+                    callee,
+                    evaluated_args,
+                    position,
+                )
                 pc += 1
             elif op is Op.RET:
                 return registers[a]
@@ -777,6 +858,11 @@ class BytecodeVM:
         if isinstance(callee, OortType):
             return self._construct(callee, args, position)
         if isinstance(callee, OortVMInvokable):
+            if all(arg.kind is ArgKind.POSITIONAL for arg in args):
+                return callee.invoke(
+                    [arg.value for arg in args],
+                    position,
+                )
             return callee.invoke_evaluated(args, position)
 
         has_keyword = any(arg.kind is ArgKind.KEYWORD for arg in args)
@@ -794,6 +880,19 @@ class BytecodeVM:
         values = [arg.value for arg in args if arg.kind is not ArgKind.BLOCK]
         values.extend(arg.value for arg in args if arg.kind is ArgKind.BLOCK)
         return self.interpreter.call_value(callee, values, position)
+
+    def _call_positional(
+        self,
+        callee: OortObject,
+        args: list[OortObject],
+        position: SourcePosition,
+    ) -> OortObject:
+        if isinstance(callee, OortType):
+            evaluated = [EvaluatedArg(value) for value in args]
+            return self._construct(callee, evaluated, position)
+        if isinstance(callee, OortVMInvokable):
+            return callee.invoke(args, position)
+        return self.interpreter.call_value(callee, args, position)
 
     def _construct(
         self,

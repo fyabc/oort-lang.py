@@ -52,6 +52,11 @@ class Signature:
         )
         self._by_name = {param.name: param for param in self.params}
         self._spec_by_name = {spec.name: spec for spec in self.spec.params}
+        self._simple_positional = all(
+            param.kind in (ParameterKind.DEFAULT, ParameterKind.POS_ONLY)
+            and param.default_value is None
+            for param in self.params
+        )
 
     def _params_for(self, specs: list[ParamSpec]) -> list[Parameter]:
         return [self._by_name[spec.name] for spec in specs]
@@ -85,6 +90,16 @@ class Signature:
         from .objects import OortDict, OortNull, OortString, OortTuple
 
         args = normalize_args(args)
+        if (
+            self._simple_positional
+            and len(args) == len(self.params)
+            and all(arg.kind == ArgumentKind.DEFAULT and arg.keyword is None for arg in args)
+        ):
+            env = Environment(outer=closure, name=name)
+            for param, arg in zip(self.params, args, strict=True):
+                env.define(param.name, arg.value)
+            return env
+
         shared = [
             EvaluatedArg(
                 arg.value,
