@@ -6,6 +6,8 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-22
+
 ### 新增
 
 - `oort-core` 轻量探针：`#lang oort-core` 搭配独立的静态检查器，支持 `Int`、`Bool`、
