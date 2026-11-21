@@ -39,6 +39,26 @@ class StoreLocal(Instruction):
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class LoadOuter(Instruction):
+    dst: int
+    depth: int
+    slot: int
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class StoreOuter(Instruction):
+    depth: int
+    slot: int
+    src: int
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class MakeClosure(Instruction):
+    dst: int
+    function_index: int
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class LoadGlobal(Instruction):
     dst: int
     name: str
@@ -192,6 +212,7 @@ class HirFunction:
     code: tuple[Instruction, ...]
     position: SourcePosition
     is_main: bool = False
+    is_lambda: bool = False
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -205,6 +226,12 @@ def register_reads(instruction: Instruction) -> tuple[int, ...]:
     if isinstance(instruction, (LoadLocal,)):
         return ()
     if isinstance(instruction, (LoadConst, LoadGlobal, Label, Jump, DefineFunction)):
+        return ()
+    if isinstance(instruction, LoadOuter):
+        return ()
+    if isinstance(instruction, StoreOuter):
+        return (instruction.src,)
+    if isinstance(instruction, MakeClosure):
         return ()
     if isinstance(instruction, (StoreLocal,)):
         return (instruction.src,)
@@ -267,6 +294,8 @@ def register_writes(instruction: Instruction) -> tuple[int, ...]:
             BuildSlice,
             GetAttr,
             GetItem,
+            LoadOuter,
+            MakeClosure,
         ),
     ):
         return (instruction.dst,)
@@ -292,11 +321,16 @@ def validate_module(module: HirModule) -> None:
                 targets.append(instruction.target)
             elif isinstance(instruction, IteratorNext):
                 targets.append(instruction.done)
-            elif isinstance(instruction, DefineFunction):
+            elif isinstance(instruction, (DefineFunction, MakeClosure)):
                 if not 0 <= instruction.function_index < len(module.functions):
                     raise ValueError(
                         f"{function.name}: bad function index {instruction.function_index}"
                     )
+            if isinstance(instruction, (LoadOuter, StoreOuter)):
+                if instruction.depth < 1:
+                    raise ValueError(f"{function.name}: invalid outer depth {instruction.depth}")
+                if not 0 <= instruction.slot < 256:
+                    raise ValueError(f"{function.name}: invalid outer slot {instruction.slot}")
             for reg in (*register_reads(instruction), *register_writes(instruction)):
                 if not 0 <= reg < function.local_count:
                     raise ValueError(

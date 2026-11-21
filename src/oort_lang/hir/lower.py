@@ -2,9 +2,10 @@
 
 """Lower the checked dynamic AST into the shared low-level HIR.
 
-This first slice covers arithmetic, locals, globals, branches, loops, calls and
-top-level functions. Anything else is rejected explicitly (OP 0004: never rely
-on a visitor's default traversal).
+This slice covers arithmetic, locals, globals, branches, loops, calls,
+top-level functions, lambdas/closures and first-class function values. Anything
+else is rejected explicitly (OP 0004: never rely on a visitor's default
+traversal).
 """
 
 import dataclasses
@@ -36,6 +37,8 @@ from .nodes import (
     LoadConst,
     LoadGlobal,
     LoadLocal,
+    LoadOuter,
+    MakeClosure,
     Move,
     OpenIterator,
     Return,
@@ -43,6 +46,7 @@ from .nodes import (
     SetItem,
     StoreGlobal,
     StoreLocal,
+    StoreOuter,
     UnOp,
     validate_module,
 )
@@ -65,12 +69,14 @@ class _FunctionState:
     max_reg: int = 0
     label_counter: int = 0
     is_main: bool = False
+    loop_depth: int = 0
 
 
 class HirLowerer:
     def __init__(self):
         self.module: nodes.ModuleNode | None = None
-        self.functions: list[HirFunction] = []
+        self._function_slots: dict[int, HirFunction] = {}
+        self._next_function_index: int = 0
         self._states: list[_FunctionState] = []
         self._global_mutability: dict[str, bool] = {}
 
@@ -83,18 +89,15 @@ class HirLowerer:
         statements = list(module.body.statements)
         function_defs: dict[int, int] = {}
         for stmt in statements:
-            if isinstance(stmt, nodes.FunctionDef):
-                if stmt.is_lambda:
-                    self._reject(stmt, "lambda definitions")
+            if isinstance(stmt, nodes.FunctionDef) and not stmt.is_lambda:
                 self._validate_top_level_function(stmt)
-                function_defs[id(stmt)] = len(function_defs)
+                function_defs[id(stmt)] = self._reserve_function_index()
 
         main = self._lower_main(statements, function_defs)
-        functions = tuple(
-            self._lower_function(stmt, function_defs[id(stmt)])
-            for stmt in statements
-            if isinstance(stmt, nodes.FunctionDef)
-        )
+        for stmt in statements:
+            if isinstance(stmt, nodes.FunctionDef) and not stmt.is_lambda:
+                self._lower_function(stmt, function_defs[id(stmt)])
+        functions = tuple(self._function_slots[index] for index in range(self._next_function_index))
         result = HirModule(main=main, functions=functions)
         validate_module(result)
         return result
@@ -102,6 +105,11 @@ class HirLowerer:
     # ------------------------------------------------------------------
     # Functions and main
     # ------------------------------------------------------------------
+
+    def _reserve_function_index(self) -> int:
+        index = self._next_function_index
+        self._next_function_index += 1
+        return index
 
     def _validate_top_level_function(self, node: nodes.FunctionDef) -> None:
         if node.is_extension:
@@ -123,7 +131,7 @@ class HirLowerer:
         try:
             last: int | None = None
             for stmt in statements:
-                if isinstance(stmt, nodes.FunctionDef):
+                if isinstance(stmt, nodes.FunctionDef) and not stmt.is_lambda:
                     self._validate_top_level_function(stmt)
                     name = stmt.name
                     index = function_defs[id(stmt)]
@@ -150,36 +158,82 @@ class HirLowerer:
         state = _FunctionState(name=node.name, code=[], scopes=[{}])
         self._states.append(state)
         try:
-            params: list[str] = []
-            for param in node.params:
-                if param.default_value is not None or param.kind not in (
-                    nodes.ParameterKind.DEFAULT,
-                    nodes.ParameterKind.POS_ONLY,
-                ):
-                    self._reject(
-                        param,
-                        "default, keyword-only, variadic or block parameters",
-                    )
-                slot = self._declare_local(param.name, mutable=False, position=param.position)
-                params.append(param.name)
-                if slot != len(params) - 1:
-                    self._reject(param, "non-contiguous parameter slots")
-
-            last: int | None = None
-            for stmt in node.body.statements:
-                last = self._lower_stmt(stmt)
-            if last is None:
-                last = self._const(None, node.position)
-            self._emit(Return(node.position, last))
-            return HirFunction(
+            params = self._lower_parameters(node, anonymous=False)
+            self._lower_function_body(node)
+            result = HirFunction(
                 name=node.name,
-                params=tuple(params),
+                params=params,
                 local_count=state.max_reg,
                 code=tuple(state.code),
                 position=node.position,
             )
         finally:
             self._states.pop()
+        self._function_slots[index] = result
+        return result
+
+    def _lower_lambda(self, node: nodes.FunctionDef) -> int:
+        if self.state.loop_depth:
+            self._reject(
+                node,
+                "lambdas created inside loops (per-iteration capture is not implemented)",
+            )
+        if node.type_params:
+            self._reject(node, "generic lambdas")
+        index = self._reserve_function_index()
+        state = _FunctionState(name="<lambda>", code=[], scopes=[{}])
+        self._states.append(state)
+        try:
+            params = self._lower_parameters(node, anonymous=True)
+            self._lower_function_body(node)
+            result = HirFunction(
+                name="<lambda>",
+                params=params,
+                local_count=state.max_reg,
+                code=tuple(state.code),
+                position=node.position,
+                is_lambda=True,
+            )
+        finally:
+            self._states.pop()
+        self._function_slots[index] = result
+        dst = self._alloc(node.position)
+        self._emit(MakeClosure(node.position, dst, index))
+        return dst
+
+    def _lower_parameters(self, node: nodes.FunctionDef, *, anonymous: bool) -> tuple[str, ...]:
+        params: list[str] = []
+        if anonymous and not node.has_explicit_param_list:
+            for index in range(node.anonymous_count):
+                name = f"${index}"
+                slot = self._declare_local(name, mutable=False, position=node.position)
+                params.append(name)
+                if slot != len(params) - 1:
+                    self._reject(node, "non-contiguous parameter slots")
+            return tuple(params)
+        for param in node.params:
+            if param.default_value is not None or param.kind not in (
+                nodes.ParameterKind.DEFAULT,
+                nodes.ParameterKind.POS_ONLY,
+            ):
+                self._reject(
+                    param,
+                    "default, keyword-only, variadic or block parameters",
+                )
+            slot = self._declare_local(param.name, mutable=False, position=param.position)
+            params.append(param.name)
+            if slot != len(params) - 1:
+                self._reject(param, "non-contiguous parameter slots")
+        return tuple(params)
+
+    def _lower_function_body(self, node: nodes.FunctionDef) -> int:
+        last: int | None = None
+        for stmt in node.body.statements:
+            last = self._lower_stmt(stmt)
+        if last is None:
+            last = self._const(None, node.position)
+        self._emit(Return(node.position, last))
+        return last
 
     # ------------------------------------------------------------------
     # Statements and expressions
@@ -205,6 +259,8 @@ class HirLowerer:
         if isinstance(node, (nodes.BreakExpr, nodes.ContinueExpr)):
             self._reject(node, "break/continue")
         if isinstance(node, nodes.FunctionDef):
+            if node.is_lambda:
+                return self._lower_expr(node)
             self._reject(node, "nested function definitions")
         return self._lower_expr(node)
 
@@ -250,12 +306,20 @@ class HirLowerer:
                 self._reject(node.lhs, "assignment to an immutable global")
             self._emit(StoreGlobal(node.lhs.position, node.lhs.id, value))
             return None
-        name = self._find_local(node.lhs.id)
-        if name is None:
-            self._reject(node.lhs, "closures over outer function locals")
-        if not name.mutable:
-            self._reject(node.lhs, "assignment to an immutable local")
-        self._emit(StoreLocal(node.lhs.position, name.slot, value))
+        local = self._find_local(node.lhs.id)
+        if local is not None:
+            if not local.mutable:
+                self._reject(node.lhs, "assignment to an immutable local")
+            self._emit(StoreLocal(node.lhs.position, local.slot, value))
+            return None
+        outer = self._find_outer(node.lhs.id)
+        if outer is None:
+            self._reject(node.lhs, "closure over an unknown local")
+        owner_index, outer_binding = outer
+        if not outer_binding.mutable:
+            self._reject(node.lhs, "assignment to an immutable outer local")
+        depth = len(self._states) - 1 - owner_index
+        self._emit(StoreOuter(node.lhs.position, depth, outer_binding.slot, value))
         return None
 
     def _lower_expr(self, node: nodes.ASTNode | None) -> int | None:
@@ -323,6 +387,10 @@ class HirLowerer:
             dst = self._alloc(node.position)
             self._emit(GetAttr(node.position, dst, receiver, node.attribute))
             return dst
+        if isinstance(node, nodes.FunctionDef):
+            if node.is_lambda:
+                return self._lower_lambda(node)
+            self._reject(node, "nested function definitions")
         if isinstance(node, nodes.SliceLiteral):
             start = None if node.start is None else self._require_value(node.start)
             stop = None if node.stop is None else self._require_value(node.stop)
@@ -355,10 +423,17 @@ class HirLowerer:
             self._emit(LoadGlobal(node.position, dst, node.id))
             return dst
         local = self._find_local(node.id)
-        if local is None:
-            self._reject(node, "closures over outer function locals")
+        if local is not None:
+            dst = self._alloc(node.position)
+            self._emit(LoadLocal(node.position, dst, local.slot))
+            return dst
+        outer = self._find_outer(node.id)
+        if outer is None:
+            self._reject(node, "closure over an unknown local")
+        owner_index, outer_binding = outer
+        depth = len(self._states) - 1 - owner_index
         dst = self._alloc(node.position)
-        self._emit(LoadLocal(node.position, dst, local.slot))
+        self._emit(LoadOuter(node.position, dst, depth, outer_binding.slot))
         return dst
 
     def _lower_logical(self, node: nodes.BooleanExpr, *, jump_on_true: bool) -> int:
@@ -396,7 +471,11 @@ class HirLowerer:
         self._emit(Label(node.position, start))
         condition = self._require_value(node.condition)
         self._emit(JumpIfFalse(node.position, condition, end))
-        self._lower_block(node.body)
+        self.state.loop_depth += 1
+        try:
+            self._lower_block(node.body)
+        finally:
+            self.state.loop_depth -= 1
         self._emit(Jump(node.position, start))
         self._emit(Label(node.position, end))
         return result
@@ -422,7 +501,11 @@ class HirLowerer:
                 position=loop_var.position,
             )
             self._emit(StoreLocal(loop_var.position, slot, value))
-            self._lower_block(node.body)
+            self.state.loop_depth += 1
+            try:
+                self._lower_block(node.body)
+            finally:
+                self.state.loop_depth -= 1
         finally:
             self._pop_scope()
         self._emit(Jump(node.position, start))
@@ -444,15 +527,12 @@ class HirLowerer:
     def _lower_call(self, node: nodes.Call) -> int:
         if node.infix:
             self._reject(node, "infix calls")
-        if not isinstance(node.func, nodes.Name):
-            self._reject(node, "calls through function values/attributes")
+        callee = self._require_value(node.func)
         args: list[int] = []
         for arg in node.args:
             if arg.keyword is not None or arg.kind != nodes.ArgumentKind.DEFAULT:
                 self._reject(arg, "keyword, variadic or block arguments")
             args.append(self._require_value(arg.value))
-        callee = self._alloc(node.position)
-        self._emit(LoadGlobal(node.func.position, callee, node.func.id))
         dst = self._alloc(node.position)
         self._emit(Call(node.position, dst, callee, tuple(args)))
         return dst
@@ -480,6 +560,14 @@ class HirLowerer:
             found = scope.get(name)
             if found is not None:
                 return found
+        return None
+
+    def _find_outer(self, name: str) -> tuple[int, _ScopeName] | None:
+        for state_index in range(len(self._states) - 2, -1, -1):
+            for scope in reversed(self._states[state_index].scopes):
+                found = scope.get(name)
+                if found is not None:
+                    return state_index, found
         return None
 
     def _alloc(self, position: SourcePosition) -> int:

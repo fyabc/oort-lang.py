@@ -24,6 +24,8 @@ from .nodes import (
     LoadConst,
     LoadGlobal,
     LoadLocal,
+    LoadOuter,
+    MakeClosure,
     Move,
     OpenIterator,
     Return,
@@ -31,6 +33,7 @@ from .nodes import (
     SetItem,
     StoreGlobal,
     StoreLocal,
+    StoreOuter,
     UnOp,
 )
 
@@ -42,6 +45,12 @@ def format_instruction(instruction: Instruction) -> str:
         return f"LOAD_L R{instruction.dst} slot{instruction.slot}"
     if isinstance(instruction, StoreLocal):
         return f"STORE_L slot{instruction.slot} R{instruction.src}"
+    if isinstance(instruction, LoadOuter):
+        return f"LOAD_OUTER R{instruction.dst} depth={instruction.depth} slot={instruction.slot}"
+    if isinstance(instruction, StoreOuter):
+        return f"STORE_OUTER depth={instruction.depth} slot={instruction.slot} R{instruction.src}"
+    if isinstance(instruction, MakeClosure):
+        return f"MAKE_CLOSURE R{instruction.dst} proto[{instruction.function_index}]"
     if isinstance(instruction, LoadGlobal):
         return f"LOAD_G R{instruction.dst} {instruction.name}"
     if isinstance(instruction, StoreGlobal):

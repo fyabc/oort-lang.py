@@ -17,9 +17,12 @@ from oort_lang.hir import (
     JumpIfTrue,
     Label,
     LoadLocal,
+    LoadOuter,
+    MakeClosure,
     SetAttr,
     StoreGlobal,
     StoreLocal,
+    StoreOuter,
     lower_module,
     validate_module,
 )
@@ -118,6 +121,48 @@ xs.foo = 1
     assert any(isinstance(i, SetAttr) for i in code)
 
 
+def test_lambdas_lower_to_function_values():
+    module = lower(
+        """val double = do: $0 * 2
+val inc = do(x): x + 1
+print(double(3), inc(4))
+"""
+    )
+    closures = [i for i in module.main.code if isinstance(i, MakeClosure)]
+    assert len(closures) == 2
+    lambdas = [function for function in module.functions if function.is_lambda]
+    assert len(lambdas) == 2
+    assert lambdas[0].params == ("$0",)
+    assert lambdas[1].params == ("x",)
+
+
+def test_closures_read_and_write_outer_locals():
+    module = lower(
+        """def make(n) {
+    var total = n
+    do(v): {
+        total = total + v
+        total
+    }
+}
+val f = make(1)
+print(f(2))
+"""
+    )
+    closure = next(function for function in module.functions if function.is_lambda)
+    assert any(isinstance(i, LoadOuter) and i.depth == 1 for i in closure.code)
+    assert any(isinstance(i, StoreOuter) for i in closure.code)
+
+
+def test_calls_accept_function_values_and_subscripts():
+    module = lower(
+        """val f = do(x): x
+print(f(1), [f][0](2))
+"""
+    )
+    assert sum(isinstance(i, Call) for i in module.main.code) >= 3
+
+
 def test_logical_operators_short_circuit_with_jumps():
     module = lower(
         """\
@@ -133,7 +178,6 @@ print(true or false)
     ("source", "detail"),
     [
         ("class C {}\n", "ClassDef"),
-        ("val f = do: 1\n", "FunctionDef"),
         ("def f(a) { a }\nf(a = 1)\n", "keyword"),
         ("for a, b in [1] { print(a) }\n", "multiple loop"),
         (
@@ -147,3 +191,13 @@ print(true or false)
 def test_unsupported_nodes_are_rejected(source: str, detail: str):
     with pytest.raises(UnsupportedSyntax, match=detail):
         lower_module(build_ast(source))
+
+
+def test_lambda_inside_loop_is_rejected():
+    with pytest.raises(UnsupportedSyntax, match="lambdas created inside loops"):
+        lower_module(build_ast("while false { val f = do: 1 }\n"))
+
+
+def test_lambda_assigning_immutable_outer_is_rejected():
+    with pytest.raises(UnsupportedSyntax, match="immutable outer local"):
+        lower_module(build_ast("def f() { val x = 1\n do: { x = 2 } }\nf()\n"))

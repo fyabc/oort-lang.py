@@ -93,6 +93,35 @@ def sign(n) {
 }
 print(sign(-2), sign(0), sign(3))
 """,
+    """\
+val double = do: $0 * 2
+val inc = do(x): x + 1
+print(double(3), inc(4))
+print(map([1, 2, 3], do(v): v + 1))
+""",
+    """\
+def counter(start) {
+    var n = start
+    do: {
+        n = n + 1
+        n
+    }
+}
+val c = counter(10)
+print(c(), c())
+""",
+    """\
+def nested(a) {
+    do(x): do(y): a + x + y
+}
+val g = nested(100)
+print(g(5)(1))
+
+def apply(f, x) { f(x) }
+print(apply(do(v): v * 3, 7))
+val fs = [do: $0 + 1, do: $0 + 2]
+print(fs[0](10), fs[1](10))
+""",
 ]
 
 
@@ -137,6 +166,18 @@ val xs = [1]
 xs.foo = 1
 """)
     assert "Cannot set attribute 'foo'" in caplog.text
+
+
+def test_vm_reports_closure_errors(caplog: pytest.LogCaptureFixture):
+    compiler = get_compiler(["NOT_EXIST", "-t", "vm"])
+    with pytest.raises(CompilerError):
+        compiler.run_string("while false { val f = do: 1 }\n")
+    assert "lambdas created inside loops" in caplog.text
+
+    compiler = get_compiler(["NOT_EXIST", "-t", "vm"])
+    with pytest.raises(CompilerError):
+        compiler.run_string("val f = do(x): x\nf()\n")
+    assert "expects 1 arguments" in caplog.text
 
 
 def test_vm_returns_last_value():

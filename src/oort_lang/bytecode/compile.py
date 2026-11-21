@@ -27,6 +27,8 @@ from ..hir.nodes import (
     LoadConst,
     LoadGlobal,
     LoadLocal,
+    LoadOuter,
+    MakeClosure,
     Move,
     OpenIterator,
     Return,
@@ -34,6 +36,7 @@ from ..hir.nodes import (
     SetItem,
     StoreGlobal,
     StoreLocal,
+    StoreOuter,
     UnOp,
 )
 from ..source.source_position import SourcePosition
@@ -172,6 +175,34 @@ class _ProtoCompiler:
         if isinstance(instruction, StoreLocal):
             self._word(
                 encode_abc(Op.STORE_L, instruction.slot, instruction.src, 0),
+                position,
+            )
+            return
+        if isinstance(instruction, LoadOuter):
+            self._word(
+                encode_abc(
+                    Op.LOAD_OUTER,
+                    instruction.dst,
+                    instruction.depth,
+                    instruction.slot,
+                ),
+                position,
+            )
+            return
+        if isinstance(instruction, StoreOuter):
+            self._word(
+                encode_abc(
+                    Op.STORE_OUTER,
+                    instruction.depth,
+                    instruction.slot,
+                    instruction.src,
+                ),
+                position,
+            )
+            return
+        if isinstance(instruction, MakeClosure):
+            self._word(
+                encode_abx(Op.MAKE_CLOSURE, instruction.dst, instruction.function_index),
                 position,
             )
             return

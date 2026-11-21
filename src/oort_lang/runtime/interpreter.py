@@ -39,6 +39,7 @@ from .functions import (
     OortMethod,
     OortNativeFunction,
     OortNativeMethod,
+    OortVMInvokable,
 )
 from .native import NativeMode
 from .objects import (
@@ -231,7 +232,7 @@ class ASTInterpreter(ASTVisitor[OortObject]):
     def call_value(self, func, args, position=None) -> OortObject:
         """Call any Oort callable with already-evaluated positional values."""
         error_position = position or self._builtin_position()
-        if isinstance(func, (OortNativeFunction, OortNativeMethod)):
+        if isinstance(func, (OortNativeFunction, OortNativeMethod, OortVMInvokable)):
             try:
                 return func(self, args, position)
             except OortException:

@@ -129,6 +129,26 @@ xs.foo = 1
     assert "SET_ATTR" in text
 
 
+def test_closures_compile_to_closure_opcodes():
+    module = compile_source(
+        """def make(n) {
+    do(v): v + n
+}
+print(make(1)(2))
+"""
+    )
+    closure = next(
+        proto
+        for proto in module.functions
+        if any(decode(word).op is Op.MAKE_CLOSURE for word in proto.code)
+    )
+    ops = {decode(word).op for word in closure.code}
+    assert Op.MAKE_CLOSURE in ops
+    text = disassemble_module(module)
+    assert "MAKE_CLOSURE" in text
+    assert "LOAD_OUTER" in text
+
+
 def test_disassembly_mentions_protos_and_calls():
     text = disassemble_module(compile_source("def f(a) { a }\nprint(f(1))\n"))
     assert "Proto <main>" in text

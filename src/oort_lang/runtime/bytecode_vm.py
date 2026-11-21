@@ -19,6 +19,7 @@ from ..diagnostics import OortException
 from ..diagnostics.runtime_errors import OortNameError, OortRuntimeError, OortTypeError
 from ..source.source_position import SourcePosition
 from .environment import Environment
+from .functions import OortVMInvokable
 from .objects import (
     OortBool,
     OortDict,
@@ -35,13 +36,44 @@ _BINARY_SYMBOLS = {opcode: symbol for symbol, opcode in BINARY_OPCODES.items()}
 _UNARY_SYMBOLS = {opcode: symbol for symbol, opcode in UNARY_OPCODES.items()}
 
 
-class OortVMFunction(OortObject):
-    """A top-level function produced by bytecode ``DEF_FUN``."""
+class VMFrame:
+    """Activation record captured by closures (frame-capture, not upvalues)."""
 
-    def __init__(self, vm: BytecodeVM, proto: Proto):
+    __slots__ = ("parent", "registers")
+
+    def __init__(
+        self,
+        registers: list[OortObject],
+        parent: VMFrame | None = None,
+    ):
+        self.registers = registers
+        self.parent = parent
+
+
+class OortVMClosure(OortVMInvokable, OortObject):
+    """A bytecode function, optionally capturing its defining frame."""
+
+    def __init__(
+        self,
+        vm: BytecodeVM,
+        proto: Proto,
+        frame: VMFrame | None = None,
+    ):
         super().__init__(vm.interpreter.runtime.types.function_type)
         self.vm = vm
         self.proto = proto
+        self.frame = frame
+
+    @property
+    def arity(self) -> int:
+        return len(self.proto.params)
+
+    def invoke(
+        self,
+        args: list[OortObject],
+        position: SourcePosition | None = None,
+    ) -> OortObject:
+        return self.vm.invoke(self, args, position)
 
     def __repr__(self):
         return f"<Function {self.proto.name}>"
@@ -69,17 +101,32 @@ class BytecodeVM:
     # Frames and dispatch
     # ------------------------------------------------------------------
 
-    def _execute(self, proto: Proto, args: list[OortObject]) -> OortObject:
+    def invoke(
+        self,
+        closure: OortVMClosure,
+        args: list[OortObject],
+        position: SourcePosition | None = None,
+    ) -> OortObject:
+        return self._execute(closure.proto, args, closure.frame, position)
+
+    def _execute(
+        self,
+        proto: Proto,
+        args: list[OortObject],
+        parent_frame: VMFrame | None = None,
+        call_position: SourcePosition | None = None,
+    ) -> OortObject:
         if len(args) != len(proto.params):
             raise OortTypeError(
                 f"Function '{proto.name}' expects {len(proto.params)} arguments, got {len(args)}.",
-                proto.positions[0] if proto.positions else _fallback_position(),
+                call_position or (proto.positions[0] if proto.positions else _fallback_position()),
             )
         registers: list[OortObject] = [
             self.interpreter.runtime.null for _ in range(proto.register_count)
         ]
         for index, value in enumerate(args):
             registers[index] = value
+        frame = VMFrame(registers, parent_frame)
         constants = proto.constants
         instructions = self._decoded(proto)
         positions = proto.positions
@@ -115,12 +162,48 @@ class BytecodeVM:
                 self.globals.define(name, registers[a], mutable=True)
                 self._globals_cache[name] = registers[a]
                 pc += 1
+            elif op is Op.LOAD_OUTER:
+                outer = frame
+                for _ in range(b):
+                    if outer.parent is None:
+                        raise OortTypeError(
+                            "Invalid closure depth in bytecode.",
+                            position,
+                        )
+                    outer = outer.parent
+                registers[a] = outer.registers[c]
+                pc += 1
+            elif op is Op.STORE_OUTER:
+                outer = frame
+                for _ in range(a):
+                    if outer.parent is None:
+                        raise OortTypeError(
+                            "Invalid closure depth in bytecode.",
+                            position,
+                        )
+                    outer = outer.parent
+                outer.registers[b] = registers[c]
+                pc += 1
+            elif op is Op.MAKE_CLOSURE:
+                assert self.module is not None
+                proto_index = decoded.bx
+                if not 0 <= proto_index < len(self.module.functions):
+                    raise OortTypeError(
+                        f"Invalid bytecode function index {proto_index}.",
+                        position,
+                    )
+                registers[a] = OortVMClosure(
+                    self,
+                    self.module.functions[proto_index],
+                    frame,
+                )
+                pc += 1
             elif op is Op.DEF_FUN:
                 assert self.module is not None
                 proto_index = decoded.bx
                 if not 0 <= proto_index < len(self.module.functions):
                     raise OortTypeError(f"Invalid bytecode function index {proto_index}.", position)
-                function = OortVMFunction(self, self.module.functions[proto_index])
+                function = OortVMClosure(self, self.module.functions[proto_index])
                 self.globals.define(function.proto.name, function, mutable=False)
                 self._globals_cache[function.proto.name] = function
                 pc += 1
@@ -273,8 +356,8 @@ class BytecodeVM:
         args: list[OortObject],
         position: SourcePosition,
     ) -> OortObject:
-        if isinstance(callee, OortVMFunction):
-            return self._execute(callee.proto, args)
+        if isinstance(callee, OortVMClosure):
+            return callee.invoke(args, position)
         return self.interpreter.call_value(callee, args, position)
 
     def _decoded(self, proto: Proto) -> tuple[Decoded, ...]:

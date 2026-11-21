@@ -26,6 +26,12 @@ def _format(proto: Proto, pc: int, decoded: Decoded) -> str:
         return f"STORE_G R{decoded.a} {_const(proto, decoded.bx)}"
     if op is Op.DEF_FUN:
         return f"DEF_FUN proto[{decoded.bx}]"
+    if op is Op.MAKE_CLOSURE:
+        return f"MAKE_CLOSURE R{decoded.a} proto[{decoded.bx}]"
+    if op is Op.LOAD_OUTER:
+        return f"LOAD_OUTER R{decoded.a} depth={decoded.b} slot={decoded.c}"
+    if op is Op.STORE_OUTER:
+        return f"STORE_OUTER depth={decoded.a} slot={decoded.b} R{decoded.c}"
     if op is Op.MOVE:
         return f"MOVE R{decoded.a} R{decoded.b}"
     if op in {

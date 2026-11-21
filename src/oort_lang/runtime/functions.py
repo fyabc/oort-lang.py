@@ -40,6 +40,16 @@ class OortCallableMixin:
         raise NotImplementedError
 
 
+class OortVMInvokable(OortCallableMixin):
+    """Callable owned by a bytecode VM, invokable from native helpers."""
+
+    def invoke(self, args, position=None):
+        raise NotImplementedError
+
+    def __call__(self, interpreter, args, position=None):
+        return self.invoke(args, position)
+
+
 class OortFunctionMixin(OortCallableMixin):
     def __init__(self, name: str = "<lambda>"):
         # Cooperative init: the next class in the concrete MRO is an OortObject.
