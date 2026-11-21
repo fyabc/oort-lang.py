@@ -16,5 +16,14 @@
     "loop_ms": 95.04,
     "loop_speedup": 1.96,
     "note": "加入集合、类、模块、ADT、参数绑定后"
+  },
+  {
+    "date": "2026-11-22",
+    "status": "0.4.0",
+    "fib_ms": 34.65,
+    "fib_speedup": 2.97,
+    "loop_ms": 94.19,
+    "loop_speedup": 1.99,
+    "note": "VM 动态子集完整（闭包/元类/super/扩展/协议）"
   }
 ]
