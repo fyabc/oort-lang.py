@@ -36,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   at the exact branch or argument.
 - The VSCode grammar (0.1.3) highlights `enum` declarations and names,
   `match`, `=>` and `Unit`; 0.1.2 added the first enum/match scopes.
+- Internal backend foundation: a shared linear-register HIR and a 32-bit
+  bytecode compiler/disassembler for the dynamic scalar/function/loop subset.
+  `-t bc` prints the disassembly; execution still uses the tree-walking
+  interpreter until the VM and differential tests land.
 - `oort-object` subscript and missing-attribute protocols (OP 0018):
   `def operator "[]"(index)` / `def operator "[]="(index, value)` for
   user-defined indexing (including slices and tuple indices), and a read-only

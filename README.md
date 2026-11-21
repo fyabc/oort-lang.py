@@ -98,6 +98,7 @@ oort
 # 只打印 AST / 带元数据的 AST
 oort test.ort -t ast
 oort test.ort -t astm
+oort test.ort -t bc       # 打印 HIR/字节码反汇编（动态子集）
 ```
 
 ### 使用 pip

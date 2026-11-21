@@ -22,7 +22,7 @@
 | [10-category-theory-notes.md](10-category-theory-notes.md) | 范畴论在编译器中的应用笔记 |
 | [11-latest-research-2025.md](11-latest-research-2025.md) | 2025–2026 年语言设计前沿调研 |
 | [12-host-boundary.md](12-host-boundary.md) | 宿主边界、HostBridge、原生调用模式与 Rust 迁移 |
-| [13-hir-design.md](13-hir-design.md) | 共享 HIR：线性寄存器指令、lowering 范围、作用域与下一步 |
+| [13-hir-design.md](13-hir-design.md) | 共享 HIR 与 32 位字节码编码：指令、lowering 范围、调用约定与下一步 |
 
 ## 使用注意
 

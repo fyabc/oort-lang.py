@@ -1,7 +1,8 @@
 # HIR 设计（共享后端）
 
-> **状态**：第一切片已实现（`src/oort_lang/hir/`）。字节码编码、VM 与
-> 解释器差分测试尚未开始。字节码 ISA 参考
+> **状态**：HIR 与 32 位字节码编码/反汇编第一切片已实现
+> （`src/oort_lang/hir/`、`src/oort_lang/bytecode/`）。VM 与解释器差分测试
+> 尚未开始。字节码 ISA 参考
 > [02-bytecode-vm-design.md](02-bytecode-vm-design.md)，重实现约束见
 > [OP 0004](../proposals/0004-bytecode-vm.md)。
 
@@ -93,11 +94,26 @@ HIR 是 AST 与字节码之间的**线性寄存器中间表示**：
 测试在 `tests/unit/backend/test_hir.py`，并包含 `format_module` 的人工可读
 dump 用于调试。
 
-## 7. 下一步
+## 7. 字节码编码（第一切片）
 
-1. 字节码编码（32 位 ABC/ABx/AsBx）与反汇编；HIR 指令直接映射。
-2. 寄存器式 VM：帧、常量池、全局表、调用约定、迭代器/运算符复用解释器
+- 32 位定长：ABC（A/B/C 各 8 位）、ABx、AsBx、Ax；`Op` 为 8 位操作码。
+- 跳转使用相对 sBx，编译后统一回填标签；`ITER_NEXT` 展开为
+  `ITER_NEXT value iterator valid` + `JUMP_FALSE valid done`，因此一条 HIR
+  可以生成多个机器字，标签映射按**机器字下标**计算。
+- 常量池去重且区分 Bool/Int/Float/String/Null；全局名与字面量共用常量池。
+- HIR `CALL dst callee args...` 使用函数末尾的 scratch 区约定：
+  `CALL A B C` 中 `R(A)` 为被调者、`R(A+1..A+C)` 为实参、结果写回 `R(A)`；
+  编译器先 MOVE 到 scratch 再回写 dst。`register_count` 包含 scratch，
+  超过 256 报 `UnsupportedSyntax`。
+- 每个机器字对应一条 line_table 记录；`Proto` 携带参数、寄存器数、常量池、
+  指令字与行号表。
+- `-t bc` 打印反汇编（文件名保持 `-t ast`/`-t astm` 的调试风格）；`eval`
+  仍是默认执行后端。
+
+## 8. 下一步
+
+1. 寄存器式 VM：帧、常量池、全局表、调用约定、迭代器/运算符复用解释器
    语义；未支持值类型显式报错。
-3. CLI 增加后端选择（保留 `eval` 为默认，直到差分与基准通过）。
-4. `benchmarks/test_vm.py`：同一程序 interpreter vs VM 配对基准。
-5. 差分测试通过后逐步扩展到集合、属性/下标、类、模块与 core 方言。
+2. 保持 `-t eval` 默认，增加后端选择开关；VM 差分测试通过后再考虑默认切换。
+3. `benchmarks/test_vm.py`：同一程序 interpreter vs VM 配对基准。
+4. 差分测试通过后逐步扩展到集合、属性/下标、类、模块与 core 方言。
