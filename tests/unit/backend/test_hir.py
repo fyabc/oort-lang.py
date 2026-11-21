@@ -14,9 +14,12 @@ from oort_lang.hir import (
     DefineFunction,
     GetAttr,
     GetItem,
+    ImportFrom,
+    ImportModule,
     JumpIfFalse,
     JumpIfTrue,
     Label,
+    LoadGlobal,
     LoadLocal,
     LoadOuter,
     MakeClosure,
@@ -196,6 +199,32 @@ print(f(1), [f][0](2))
     assert sum(isinstance(i, Call) for i in module.main.code) >= 3
 
 
+def test_imports_lower_and_hoist_before_other_statements():
+    module = lower(
+        """print("before")
+import "./lib"
+from "./lib" import add as plus
+print("after")
+"""
+    )
+    code = module.main.code
+    imports = [i for i in code if isinstance(i, (ImportModule, ImportFrom))]
+    assert len(imports) == 2
+    assert isinstance(imports[0], ImportModule)
+    assert imports[0].module_path == "./lib"
+    assert isinstance(imports[1], ImportFrom)
+    assert imports[1].names == (("add", "plus"),)
+    first_load = next(index for index, i in enumerate(code) if isinstance(i, LoadGlobal))
+    assert code.index(imports[1]) < first_load
+
+
+def test_import_bindings_are_immutable():
+    with pytest.raises(UnsupportedSyntax, match="immutable global"):
+        lower_module(build_ast('import "./lib"\nlib = 1\n'))
+    with pytest.raises(UnsupportedSyntax, match="immutable global"):
+        lower_module(build_ast('from "./lib" import add\nadd = 1\n'))
+
+
 def test_logical_operators_short_circuit_with_jumps():
     module = lower(
         """\
@@ -210,7 +239,6 @@ print(true or false)
 @pytest.mark.parametrize(
     ("source", "detail"),
     [
-        ("while true { break }\n", "break/continue"),
         ("def f(a) { a }\nf(a = 1)\n", "keyword"),
         ("for a, b in [1] { print(a) }\n", "multiple loop"),
         (

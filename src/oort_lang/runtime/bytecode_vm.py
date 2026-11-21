@@ -9,16 +9,21 @@ instead of silently skipping it.
 
 from __future__ import annotations
 
-from ..bytecode import BytecodeModule, ClassSpec, Decoded, Proto, decode
+from ..bytecode import BytecodeModule, ClassSpec, Decoded, ImportSpec, Proto, decode
 from ..bytecode.opcodes import (
     BINARY_OPCODES,
     UNARY_OPCODES,
     Op,
 )
 from ..diagnostics import OortException
-from ..diagnostics.runtime_errors import OortNameError, OortRuntimeError, OortTypeError
+from ..diagnostics.runtime_errors import (
+    OortImportError,
+    OortNameError,
+    OortRuntimeError,
+    OortTypeError,
+)
 from ..source.source_position import SourcePosition
-from .environment import Environment
+from .environment import DefineResult, Environment
 from .functions import OortVMInvokable
 from .objects import (
     OortBool,
@@ -52,18 +57,22 @@ class VMFrame:
 
 
 class OortVMClosure(OortVMInvokable, OortObject):
-    """A bytecode function, optionally capturing its defining frame."""
+    """A bytecode function, its module globals and optional captured frame."""
 
     def __init__(
         self,
         vm: BytecodeVM,
+        module: BytecodeModule,
         proto: Proto,
         frame: VMFrame | None = None,
+        env: Environment | None = None,
     ):
         super().__init__(vm.interpreter.runtime.types.function_type)
         self.vm = vm
+        self.module = module
         self.proto = proto
         self.frame = frame
+        self.env = env if env is not None else vm.globals
 
     @property
     def arity(self) -> int:
@@ -89,14 +98,16 @@ class BytecodeVM:
             allow_redefine=True,
             is_module_root=True,
         )
-        self.module: BytecodeModule | None = None
         self._decoded_cache: dict[int, tuple[Decoded, ...]] = {}
-        self._globals_cache: dict[str, OortObject] = {}
+        self._global_caches: dict[Environment, dict[str, OortObject]] = {}
 
-    def run(self, module: BytecodeModule) -> OortObject:
-        self.module = module
+    def run(self, module: BytecodeModule, env: Environment | None = None) -> OortObject:
+        return self.run_module(module, env if env is not None else self.globals)
+
+    def run_module(self, module: BytecodeModule, env: Environment) -> OortObject:
+        """Execute one module's main proto with its own globals environment."""
         with self.interpreter.runtime.activate():
-            return self._execute(module.main, [])
+            return self._execute(module, module.main, [], None, env)
 
     # ------------------------------------------------------------------
     # Frames and dispatch
@@ -108,13 +119,22 @@ class BytecodeVM:
         args: list[OortObject],
         position: SourcePosition | None = None,
     ) -> OortObject:
-        return self._execute(closure.proto, args, closure.frame, position)
+        return self._execute(
+            closure.module,
+            closure.proto,
+            args,
+            closure.frame,
+            closure.env,
+            position,
+        )
 
     def _execute(
         self,
+        module: BytecodeModule,
         proto: Proto,
         args: list[OortObject],
         parent_frame: VMFrame | None = None,
+        env: Environment | None = None,
         call_position: SourcePosition | None = None,
     ) -> OortObject:
         if len(args) != len(proto.params):
@@ -122,6 +142,8 @@ class BytecodeVM:
                 f"Function '{proto.name}' expects {len(proto.params)} arguments, got {len(args)}.",
                 call_position or (proto.positions[0] if proto.positions else _fallback_position()),
             )
+        if env is None:
+            env = self.globals
         registers: list[OortObject] = [
             self.interpreter.runtime.null for _ in range(proto.register_count)
         ]
@@ -148,20 +170,49 @@ class BytecodeVM:
                 pc += 1
             elif op is Op.LOAD_G:
                 name = str(constants[decoded.bx])
-                cached = self._globals_cache.get(name)
+                cache = self._cache_for(env)
+                cached = cache.get(name)
                 if cached is not None:
                     registers[a] = cached
                 else:
-                    entry = self.globals.get(name)
+                    entry = env.get(name)
                     if entry is None:
                         raise OortNameError(f"Name {name!r} is not defined in bytecode.", position)
                     registers[a] = entry.value
-                    self._globals_cache[name] = entry.value
+                    cache[name] = entry.value
                 pc += 1
             elif op is Op.STORE_G:
                 name = str(constants[decoded.bx])
-                self.globals.define(name, registers[a], mutable=True)
-                self._globals_cache[name] = registers[a]
+                env.define(name, registers[a], mutable=True)
+                self._cache_for(env)[name] = registers[a]
+                pc += 1
+            elif op is Op.IMPORT:
+                spec = constants[decoded.bx]
+                if not isinstance(spec, ImportSpec):
+                    raise OortTypeError("Invalid import descriptor in bytecode.", position)
+                loader = self.interpreter.module_loader
+                if loader is None:
+                    raise OortImportError(
+                        "Module imports are not available in this context.",
+                        position,
+                    )
+                if spec.is_from:
+                    _, values = loader.import_names(
+                        spec.module_path,
+                        [name for name, _ in spec.names],
+                        position,
+                    )
+                    for source, alias in spec.names:
+                        self._define_import(
+                            env,
+                            alias or source,
+                            values[source],
+                            position,
+                        )
+                else:
+                    imported = loader.import_module(spec.module_path, position)
+                    name = spec.alias or loader.binding_name(spec.module_path, position)
+                    self._define_import(env, name, imported, position)
                 pc += 1
             elif op is Op.LOAD_OUTER:
                 outer = frame
@@ -186,21 +237,21 @@ class BytecodeVM:
                 outer.registers[b] = registers[c]
                 pc += 1
             elif op is Op.MAKE_CLOSURE:
-                assert self.module is not None
                 proto_index = decoded.bx
-                if not 0 <= proto_index < len(self.module.functions):
+                if not 0 <= proto_index < len(module.functions):
                     raise OortTypeError(
                         f"Invalid bytecode function index {proto_index}.",
                         position,
                     )
                 registers[a] = OortVMClosure(
                     self,
-                    self.module.functions[proto_index],
+                    module,
+                    module.functions[proto_index],
                     frame,
+                    env,
                 )
                 pc += 1
             elif op is Op.BUILD_CLASS:
-                assert self.module is not None
                 spec = constants[decoded.bx]
                 if not isinstance(spec, ClassSpec):
                     raise OortTypeError("Invalid class descriptor in bytecode.", position)
@@ -218,7 +269,7 @@ class BytecodeVM:
                 except TypeError as exc:
                     raise OortTypeError(str(exc), position) from exc
                 for method_name, method_index in spec.methods:
-                    if not 0 <= method_index < len(self.module.functions):
+                    if not 0 <= method_index < len(module.functions):
                         raise OortTypeError(
                             f"Invalid bytecode method index {method_index}.",
                             position,
@@ -227,20 +278,21 @@ class BytecodeVM:
                         method_name,
                         OortVMClosure(
                             self,
-                            self.module.functions[method_index],
+                            module,
+                            module.functions[method_index],
                             frame,
+                            env,
                         ),
                     )
                 registers[a] = cls
                 pc += 1
             elif op is Op.DEF_FUN:
-                assert self.module is not None
                 proto_index = decoded.bx
-                if not 0 <= proto_index < len(self.module.functions):
+                if not 0 <= proto_index < len(module.functions):
                     raise OortTypeError(f"Invalid bytecode function index {proto_index}.", position)
-                function = OortVMClosure(self, self.module.functions[proto_index])
-                self.globals.define(function.proto.name, function, mutable=False)
-                self._globals_cache[function.proto.name] = function
+                function = OortVMClosure(self, module, module.functions[proto_index], None, env)
+                env.define(function.proto.name, function, mutable=False)
+                self._cache_for(env)[function.proto.name] = function
                 pc += 1
             elif op is Op.MOVE:
                 registers[a] = registers[b]
@@ -329,6 +381,20 @@ class BytecodeVM:
             else:
                 raise OortTypeError(f"Bytecode VM does not support opcode {op.name}.", position)
         return self.interpreter.runtime.null
+
+    def _define_import(
+        self,
+        env: Environment,
+        name: str,
+        value: OortObject,
+        position: SourcePosition,
+    ) -> None:
+        if env.define(name, value, mutable=False) == DefineResult.REDEFINED:
+            raise OortNameError(f"Name {name!r} is already defined", position)
+        self._cache_for(env)[name] = value
+
+    def _cache_for(self, env: Environment) -> dict[str, OortObject]:
+        return self._global_caches.setdefault(env, {})
 
     def _binary(
         self,

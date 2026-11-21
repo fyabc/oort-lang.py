@@ -2,7 +2,7 @@
 
 """Shared 32-bit bytecode: code objects, compiler, opcodes and disassembler."""
 
-from .code import BytecodeModule, ClassSpec, Proto
+from .code import BytecodeModule, ClassSpec, ImportSpec, Proto
 from .compile import compile_module
 from .disasm import disassemble_module, disassemble_proto
 from .opcodes import (
@@ -23,6 +23,7 @@ __all__ = [
     "BytecodeModule",
     "ClassSpec",
     "Decoded",
+    "ImportSpec",
     "Op",
     "Proto",
     "compile_module",

@@ -85,6 +85,18 @@ class BuildClass(Instruction):
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class ImportModule(Instruction):
+    module_path: str
+    alias: str | None = None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class ImportFrom(Instruction):
+    module_path: str
+    names: tuple[tuple[str, str | None], ...]
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class Move(Instruction):
     dst: int
     src: int

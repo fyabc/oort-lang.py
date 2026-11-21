@@ -179,6 +179,23 @@ def test_module_path_option(monkeypatch, capsys, tmp_path):
     assert capsys.readouterr().out == "7\n"
 
 
+def test_vm_module_path_option(monkeypatch, capsys, tmp_path):
+    libs = tmp_path / "libs"
+    libs.mkdir()
+    (libs / "extra.ort").write_text(
+        "var value = 11\ndef double(x) { x * 2 }\n",
+        encoding="utf-8",
+    )
+    main = tmp_path / "main.ort"
+    main.write_text(
+        'import "extra"\nfrom "extra" import double\nprint(extra.value, double(3))\n',
+        encoding="utf-8",
+    )
+
+    assert _run_cli(monkeypatch, ["-t", "vm", "-I", str(libs), str(main)]) == 0
+    assert capsys.readouterr().out == "11 6\n"
+
+
 def test_import_failure_exits_nonzero(monkeypatch, caplog, tmp_path):
     main = tmp_path / "main.ort"
     main.write_text('import "./missing"\n', encoding="utf-8")

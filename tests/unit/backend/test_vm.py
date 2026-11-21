@@ -216,6 +216,87 @@ xs.foo = 1
     assert "Cannot set attribute 'foo'" in caplog.text
 
 
+def test_vm_executes_imported_modules(tmp_path, run_file):
+    (tmp_path / "lib.ort").write_text(
+        """print("loaded")
+var value = 40
+def add(a, b) { a + b }
+class Box {
+    def __init__(n) { this.n = n }
+    def get() { this.n + value }
+}
+""",
+        encoding="utf-8",
+    )
+    (tmp_path / "facade.ort").write_text(
+        'from "./lib" import value\n',
+        encoding="utf-8",
+    )
+    main = tmp_path / "main.ort"
+    main.write_text(
+        """import "./lib"
+import "./facade"
+from "./lib" import add as plus
+print(lib.value, plus(1, 2), lib.Box(2).get())
+print(facade.value)
+""",
+        encoding="utf-8",
+    )
+    out = run_file(main, target="vm").stdout
+    assert out == "loaded\n40 3 42\n40\n"
+
+
+def test_vm_shares_module_state_and_imports_native_modules(tmp_path, run_file):
+    (tmp_path / "counter.ort").write_text(
+        """var count = 0
+def next() {
+    count = count + 1
+    count
+}
+""",
+        encoding="utf-8",
+    )
+    main = tmp_path / "main.ort"
+    main.write_text(
+        """import "./counter" as c
+from "./counter" import next
+import "math"
+print(c.next(), next(), c.count)
+print(math.sqrt(9))
+""",
+        encoding="utf-8",
+    )
+    out = run_file(main, target="vm").stdout
+    assert out == "1 2 2\n3.0\n"
+
+
+def test_vm_hoists_imports(tmp_path, run_file):
+    (tmp_path / "dep.ort").write_text('print("dep")\n', encoding="utf-8")
+    main = tmp_path / "main.ort"
+    main.write_text(
+        'print("before")\nimport "./dep"\nprint("after")\n',
+        encoding="utf-8",
+    )
+    out = run_file(main, target="vm").stdout
+    assert out == "dep\nbefore\nafter\n"
+
+
+def test_vm_reports_import_errors(tmp_path, run_file, caplog: pytest.LogCaptureFixture):
+    missing = tmp_path / "missing.ort"
+    missing.write_text('import "./nope"\n', encoding="utf-8")
+    with pytest.raises(CompilerError):
+        run_file(missing, target="vm")
+    assert "Cannot find module './nope'" in caplog.text
+
+    (tmp_path / "a.ort").write_text('import "./b"\nvar a = 1\n', encoding="utf-8")
+    (tmp_path / "b.ort").write_text('import "./a"\nvar b = 2\n', encoding="utf-8")
+    cycle = tmp_path / "cycle.ort"
+    cycle.write_text('import "./a"\n', encoding="utf-8")
+    with pytest.raises(CompilerError):
+        run_file(cycle, target="vm")
+    assert "Circular import detected" in caplog.text
+
+
 def test_vm_reports_closure_errors(caplog: pytest.LogCaptureFixture):
     compiler = get_compiler(["NOT_EXIST", "-t", "vm"])
     with pytest.raises(CompilerError):

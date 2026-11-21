@@ -16,6 +16,8 @@ from .nodes import (
     GetItem,
     HirFunction,
     HirModule,
+    ImportFrom,
+    ImportModule,
     Instruction,
     IteratorNext,
     Jump,
@@ -56,6 +58,14 @@ def format_instruction(instruction: Instruction) -> str:
         methods = ", ".join(f"{name}=proto[{index}]" for name, index in instruction.methods)
         bases = ", ".join(f"R{base}" for base in instruction.bases)
         return f"BUILD_CLASS R{instruction.dst} {instruction.name} bases=({bases}) {methods}"
+    if isinstance(instruction, ImportModule):
+        alias = "" if instruction.alias is None else f" as {instruction.alias}"
+        return f"IMPORT {instruction.module_path}{alias}"
+    if isinstance(instruction, ImportFrom):
+        names = ", ".join(
+            name if alias is None else f"{name} as {alias}" for name, alias in instruction.names
+        )
+        return f"IMPORT_FROM {instruction.module_path} ({names})"
     if isinstance(instruction, LoadGlobal):
         return f"LOAD_G R{instruction.dst} {instruction.name}"
     if isinstance(instruction, StoreGlobal):

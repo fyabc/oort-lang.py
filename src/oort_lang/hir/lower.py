@@ -10,6 +10,7 @@ visitor's default traversal).
 
 import dataclasses
 from collections.abc import Iterable
+from pathlib import PurePosixPath
 from typing import NoReturn
 
 from ..ast import nodes
@@ -29,6 +30,8 @@ from .nodes import (
     GetItem,
     HirFunction,
     HirModule,
+    ImportFrom,
+    ImportModule,
     Instruction,
     IteratorNext,
     Jump,
@@ -125,6 +128,23 @@ class HirLowerer:
         self._next_function_index += 1
         return index
 
+    def _lower_import(self, node: nodes.ImportStmt | nodes.ImportFromStmt) -> None:
+        if isinstance(node, nodes.ImportStmt):
+            self._emit(ImportModule(node.position, node.module_path, node.alias))
+            binding = node.alias or _derive_import_binding(node.module_path)
+            if binding is not None:
+                self._global_mutability[binding] = False
+            return
+        self._emit(
+            ImportFrom(
+                node.position,
+                node.module_path,
+                tuple(node.names.items()),
+            )
+        )
+        for source, alias in node.names.items():
+            self._global_mutability[alias or source] = False
+
     def _validate_top_level_class(self, node: nodes.ClassDef) -> None:
         if len(node.names) != 1:
             self._reject(node, "namespaced or anonymous classes")
@@ -168,8 +188,13 @@ class HirLowerer:
         state = _FunctionState(name="<main>", code=[], scopes=[{}], is_main=True)
         self._states.append(state)
         try:
+            for stmt in statements:
+                if isinstance(stmt, (nodes.ImportStmt, nodes.ImportFromStmt)):
+                    self._lower_import(stmt)
             last: int | None = None
             for stmt in statements:
+                if isinstance(stmt, (nodes.ImportStmt, nodes.ImportFromStmt)):
+                    continue
                 if isinstance(stmt, nodes.FunctionDef) and not stmt.is_lambda:
                     self._validate_top_level_function(stmt)
                     name = stmt.name
@@ -336,7 +361,7 @@ class HirLowerer:
             self._emit(Return(node.position, value))
             return None
         if isinstance(node, (nodes.ImportStmt, nodes.ImportFromStmt)):
-            self._reject(node, "imports")
+            self._reject(node, "nested imports")
         if isinstance(node, nodes.ClassDef):
             self._reject(node, "nested class definitions")
         if isinstance(node, (nodes.EnumDef, nodes.MatchExpr)):
@@ -705,6 +730,13 @@ class HirLowerer:
 
 def _is_reserved_method_name(name: str) -> bool:
     return len(name) > 4 and name.startswith("__") and name.endswith("__")
+
+
+def _derive_import_binding(module_path: str) -> str | None:
+    name = PurePosixPath(module_path.replace("\\", "/")).name
+    if name.lower().endswith(".ort"):
+        name = name[: -len(".ort")]
+    return name if name.isidentifier() else None
 
 
 def module_position(statements: Iterable[nodes.ASTNode]) -> SourcePosition:

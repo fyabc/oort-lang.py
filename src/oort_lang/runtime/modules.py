@@ -1,6 +1,6 @@
 #! /usr/bin/env python
 
-"""Module resolution, loading and caching for the tree-walking interpreter."""
+"""Module resolution, loading and caching for the runtime backends."""
 
 from __future__ import annotations
 

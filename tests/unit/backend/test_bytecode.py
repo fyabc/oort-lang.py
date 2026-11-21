@@ -5,6 +5,7 @@
 import pytest
 
 from oort_lang.bytecode import (
+    ImportSpec,
     Op,
     compile_module,
     decode,
@@ -165,6 +166,23 @@ print(C(1).n)
     text = disassemble_module(module)
     assert "BUILD_CLASS R" in text
     assert "C bases=0" in text
+
+
+def test_imports_compile_to_import_opcodes():
+    module = compile_source(
+        """import "./lib"
+from "./lib" import add
+print(add(1, 2))
+"""
+    )
+    import_words = [word for word in module.main.code if decode(word).op is Op.IMPORT]
+    assert len(import_words) == 2
+    specs = [value for value in module.main.constants if isinstance(value, ImportSpec)]
+    assert {spec.module_path for spec in specs} == {"./lib"}
+    assert any(spec.names == (("add", None),) and spec.is_from for spec in specs)
+    text = disassemble_module(module)
+    assert "IMPORT './lib'" in text
+    assert "names=(add)" in text
 
 
 def test_disassembly_mentions_protos_and_calls():

@@ -19,6 +19,8 @@ from ..hir.nodes import (
     GetItem,
     HirFunction,
     HirModule,
+    ImportFrom,
+    ImportModule,
     Instruction,
     IteratorNext,
     Jump,
@@ -41,7 +43,7 @@ from ..hir.nodes import (
     UnOp,
 )
 from ..source.source_position import SourcePosition
-from .code import BytecodeModule, ClassSpec, Proto
+from .code import BytecodeModule, ClassSpec, ImportSpec, Proto
 from .opcodes import (
     BINARY_OPCODES,
     UNARY_OPCODES,
@@ -229,6 +231,20 @@ class _ProtoCompiler:
             )
             bx = self._constant(spec, position)
             self._word(encode_abx(Op.BUILD_CLASS, instruction.dst, bx), position)
+            return
+        if isinstance(instruction, ImportModule):
+            import_spec = ImportSpec(instruction.module_path, alias=instruction.alias)
+            bx = self._constant(import_spec, position)
+            self._word(encode_abx(Op.IMPORT, 0, bx), position)
+            return
+        if isinstance(instruction, ImportFrom):
+            import_spec = ImportSpec(
+                instruction.module_path,
+                names=instruction.names,
+                is_from=True,
+            )
+            bx = self._constant(import_spec, position)
+            self._word(encode_abx(Op.IMPORT, 0, bx), position)
             return
         if isinstance(instruction, LoadGlobal):
             bx = self._constant(instruction.name, position)

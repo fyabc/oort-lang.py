@@ -17,6 +17,16 @@ class ClassSpec:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class ImportSpec:
+    """Constant-pool descriptor for one ``IMPORT`` instruction."""
+
+    module_path: str
+    alias: str | None = None
+    names: tuple[tuple[str, str | None], ...] = ()
+    is_from: bool = False
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class Proto:
     name: str
     params: tuple[str, ...]
