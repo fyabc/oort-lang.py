@@ -1323,6 +1323,19 @@ class TestCoreClasses:
             "Cannot assign to read-only slot 'x'; it has an initializer.",
         )
 
+    def test_val_without_initializer_can_be_assigned_only_once(self, caplog):
+        check_error(
+            caplog,
+            "class C {\n"
+            "    val x: Int\n"
+            "    def __init__(flag: Bool) {\n"
+            "        if flag { this.x = 1 }\n"
+            "        this.x = 2\n"
+            "    }\n"
+            "}\n",
+            "Read-only slot 'x' may already be assigned; it can be assigned only once.",
+        )
+
     def test_val_is_read_only_in_methods(self, caplog):
         check_error(
             caplog,
@@ -1345,6 +1358,127 @@ class TestCoreClasses:
             "}\n",
             "Read-only slot 'x' cannot be assigned inside a loop.",
         )
+
+    def test_definite_assignment_through_loops_and_member_writes(self, run_source):
+        result = run_source(
+            core(
+                """class D { var v: Int = 0 }
+class C {
+    val x: Int
+    def __init__() {
+        var i: Int = 0
+        while i < 1 { i = i + 1 }
+        for k in [1, 2] { print(k) }
+        var d = D()
+        d.v = 1
+        this.x = d.v
+    }
+}
+print(C().x)
+"""
+            )
+        )
+        assert result.stdout == "1\n2\n1\n"
+
+    def test_definite_assignment_through_match(self, run_source):
+        result = run_source(
+            core(
+                """enum E { A, B }
+class C {
+    val x: Int
+    def __init__(e: E) {
+        match e {
+            A => { this.x = 1 },
+            B => { this.x = 2 }
+        }
+    }
+}
+print(C(A).x, C(B).x)
+"""
+            )
+        )
+        assert result.stdout == "1 2\n"
+
+    def test_definite_assignment_through_break_and_continue(self, run_source):
+        result = run_source(
+            core(
+                """class C {
+    val x: Int
+    def __init__() {
+        var i: Int = 0
+        while i < 3 {
+            i = i + 1
+            if i == 1 { continue }
+            break
+        }
+        this.x = 1
+    }
+}
+print(C().x)
+"""
+            )
+        )
+        assert result.stdout == "1\n"
+
+    def test_definite_assignment_merges_early_returns(self, run_source):
+        result = run_source(
+            core(
+                """class A {
+    val x: Int
+    def __init__(flag: Bool) {
+        this.x = 1
+        if flag { return }
+    }
+}
+class B {
+    val x: Int
+    def __init__(flag: Bool) {
+        this.x = 1
+        if flag { print(1) } else { return }
+    }
+}
+print(A(false).x, B(true).x)
+"""
+            )
+        )
+        assert result.stdout == "1\n1 1\n"
+
+    def test_definite_assignment_all_match_arms_return(self, run_source):
+        result = run_source(
+            core(
+                """enum E { A, B }
+class C {
+    val x: Int
+    def __init__(e: E) {
+        this.x = 1
+        match e {
+            A => { return },
+            B => { return }
+        }
+    }
+}
+print(C(A).x)
+"""
+            )
+        )
+        assert result.stdout == "1\n"
+
+    def test_definite_assignment_skips_unreachable_statements(self, run_source):
+        result = run_source(
+            core(
+                """class C {
+    val x: Int
+    def __init__() {
+        { this.x = 1 }
+        return
+        print(2)
+    }
+}
+print(C().x)
+"""
+            )
+        )
+        assert result.stdout == "1\n"
 
     def test_undeclared_slot_assignment(self, caplog):
         check_error(
