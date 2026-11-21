@@ -46,6 +46,7 @@ print(g)
 """,
     """\
 print(1 + 2 * 3, 7 / 2, 7 // 2, 7 % 2)
+print(+5, ~1, -3, not true)
 print(1 < 2, 1 == 1.0, true and false, 0 or 3)
 print("a" + "b")
 print(1 is 1, null is null, not false)
@@ -173,6 +174,15 @@ class Point {
 }
 val p = Point(2)
 print(p.sum(), p.bump(), p.x)
+""",
+    """\
+#lang oort-core
+class Box {
+    val value: Int
+    def __init__(value: Int) { this.value = value }
+    def get() -> Int { this.value }
+}
+print(Box(3).get())
 """,
     """\
 #lang oort-core
@@ -422,11 +432,23 @@ def test_vm_reports_function_arity(caplog: pytest.LogCaptureFixture):
     assert "expects 1 arguments" in caplog.text
 
 
-def test_vm_reports_division_by_zero(caplog: pytest.LogCaptureFixture):
+@pytest.mark.parametrize(
+    ("source", "detail"),
+    [
+        ("print(1 / 0)\n", "division by zero"),
+        ("print(1 // 0)\n", "division or modulo by zero"),
+        ("print(1 % 0)\n", "modulo by zero"),
+    ],
+)
+def test_vm_reports_division_by_zero(
+    source: str,
+    detail: str,
+    caplog: pytest.LogCaptureFixture,
+):
     compiler = get_compiler(["NOT_EXIST", "-t", "vm"])
     with pytest.raises(CompilerError):
-        compiler.run_string("print(1 / 0)\n")
-    assert "division by zero" in caplog.text
+        compiler.run_string(source)
+    assert detail in caplog.text
 
 
 def test_vm_reports_class_errors(caplog: pytest.LogCaptureFixture):

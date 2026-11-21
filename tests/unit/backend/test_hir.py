@@ -320,6 +320,9 @@ print(true or false)
             "nested function",
         ),
         ("var x = 1\nx += 1\n", "augmented assignment"),
+        ("...\n", "ellipsis"),
+        ("val d = {: **other :}\n", "dict unpacking"),
+        ("val p = (1, 2)\na, b = p\n", "attribute/tuple assignment"),
     ],
 )
 def test_unsupported_nodes_are_rejected(source: str, detail: str):
