@@ -6,6 +6,7 @@ from .nodes import (
     BinOp,
     BuildClass,
     BuildDict,
+    BuildEnum,
     BuildList,
     BuildSet,
     BuildSlice,
@@ -29,6 +30,7 @@ from .nodes import (
     LoadLocal,
     LoadOuter,
     MakeClosure,
+    Match,
     Move,
     OpenIterator,
     Return,
@@ -57,7 +59,23 @@ def format_instruction(instruction: Instruction) -> str:
     if isinstance(instruction, BuildClass):
         methods = ", ".join(f"{name}=proto[{index}]" for name, index in instruction.methods)
         bases = ", ".join(f"R{base}" for base in instruction.bases)
-        return f"BUILD_CLASS R{instruction.dst} {instruction.name} bases=({bases}) {methods}"
+        slots = ", ".join(
+            f"{name}{'=' + f'proto[{index}]' if index is not None else ''}"
+            for name, _, index in instruction.slots
+        )
+        return (
+            f"BUILD_CLASS R{instruction.dst} {instruction.name} bases=({bases}) "
+            f"{methods} slots=({slots})"
+        )
+    if isinstance(instruction, BuildEnum):
+        ctors = ", ".join(f"{name}/{arity}" for name, arity in instruction.constructors)
+        return f"BUILD_ENUM R{instruction.dst} {instruction.name} ({ctors})"
+    if isinstance(instruction, Match):
+        arms = ", ".join(
+            f"{arm.pattern.kind}:{arm.pattern.name}=proto[{arm.function_index}]"
+            for arm in instruction.arms
+        )
+        return f"MATCH R{instruction.dst} R{instruction.scrutinee} ({arms})"
     if isinstance(instruction, ImportModule):
         alias = "" if instruction.alias is None else f" as {instruction.alias}"
         return f"IMPORT {instruction.module_path}{alias}"

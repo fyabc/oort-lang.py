@@ -9,6 +9,7 @@ from ..hir.nodes import (
     BinOp,
     BuildClass,
     BuildDict,
+    BuildEnum,
     BuildList,
     BuildSet,
     BuildSlice,
@@ -32,8 +33,10 @@ from ..hir.nodes import (
     LoadLocal,
     LoadOuter,
     MakeClosure,
+    Match,
     Move,
     OpenIterator,
+    Pattern,
     Return,
     SetAttr,
     SetItem,
@@ -43,7 +46,16 @@ from ..hir.nodes import (
     UnOp,
 )
 from ..source.source_position import SourcePosition
-from .code import BytecodeModule, ClassSpec, ImportSpec, Proto
+from .code import (
+    BytecodeModule,
+    ClassSpec,
+    EnumSpec,
+    ImportSpec,
+    MatchArmSpec,
+    MatchSpec,
+    PatternSpec,
+    Proto,
+)
 from .opcodes import (
     BINARY_OPCODES,
     UNARY_OPCODES,
@@ -54,6 +66,14 @@ from .opcodes import (
 )
 
 _MAX_REGISTERS = 256
+
+
+def _pattern_spec(pattern: Pattern) -> PatternSpec:
+    return PatternSpec(
+        kind=pattern.kind,
+        name=pattern.name,
+        args=tuple(_pattern_spec(arg) for arg in pattern.args),
+    )
 
 
 class _Constants:
@@ -128,6 +148,7 @@ class _ProtoCompiler:
         has_get_attr = any(isinstance(instruction, GetAttr) for instruction in function.code)
         has_set_attr = any(isinstance(instruction, SetAttr) for instruction in function.code)
         attr_scratch = 2 if has_set_attr else 1 if has_get_attr else 0
+        has_match = any(isinstance(instruction, Match) for instruction in function.code)
         class_bases = max(
             (
                 len(instruction.bases)
@@ -145,6 +166,7 @@ class _ProtoCompiler:
             build_elements,
             build_dict_slots,
             class_bases,
+            1 if has_match else 0,
         )
         self.register_count = function.local_count + self.scratch
         if self.register_count > _MAX_REGISTERS:
@@ -228,9 +250,30 @@ class _ProtoCompiler:
                 name=instruction.name,
                 base_count=len(instruction.bases),
                 methods=instruction.methods,
+                slots=instruction.slots,
             )
             bx = self._constant(spec, position)
             self._word(encode_abx(Op.BUILD_CLASS, instruction.dst, bx), position)
+            return
+        if isinstance(instruction, BuildEnum):
+            enum_spec = EnumSpec(instruction.name, instruction.constructors)
+            bx = self._constant(enum_spec, position)
+            self._word(encode_abx(Op.BUILD_ENUM, instruction.dst, bx), position)
+            return
+        if isinstance(instruction, Match):
+            base = self.scratch_base
+            self._word(encode_abc(Op.MOVE, base, instruction.scrutinee, 0), position)
+            match_spec = MatchSpec(
+                tuple(
+                    MatchArmSpec(
+                        pattern=_pattern_spec(arm.pattern),
+                        function_index=arm.function_index,
+                    )
+                    for arm in instruction.arms
+                )
+            )
+            bx = self._constant(match_spec, position)
+            self._word(encode_abx(Op.MATCH, instruction.dst, bx), position)
             return
         if isinstance(instruction, ImportModule):
             import_spec = ImportSpec(instruction.module_path, alias=instruction.alias)

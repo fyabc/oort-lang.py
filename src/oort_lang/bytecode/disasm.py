@@ -2,7 +2,14 @@
 
 """Disassemble bytecode protos to a stable human-readable form."""
 
-from .code import BytecodeModule, ClassSpec, ImportSpec, Proto
+from .code import (
+    BytecodeModule,
+    ClassSpec,
+    EnumSpec,
+    ImportSpec,
+    MatchSpec,
+    Proto,
+)
 from .opcodes import Decoded, Op, decode
 
 
@@ -32,8 +39,30 @@ def _format(proto: Proto, pc: int, decoded: Decoded) -> str:
         spec = proto.constants[decoded.bx] if 0 <= decoded.bx < len(proto.constants) else None
         if isinstance(spec, ClassSpec):
             methods = ", ".join(f"{name}=proto[{index}]" for name, index in spec.methods)
-            return f"BUILD_CLASS R{decoded.a} {spec.name} bases={spec.base_count} {methods}"
+            slots = ", ".join(
+                f"{name}{'=' + f'proto[{index}]' if index is not None else ''}"
+                for name, _, index in spec.slots
+            )
+            details = " ".join(
+                part for part in (methods, f"slots=({slots})" if slots else "") if part
+            )
+            return f"BUILD_CLASS R{decoded.a} {spec.name} bases={spec.base_count} {details}"
         return f"BUILD_CLASS R{decoded.a} <bad spec>"
+    if op is Op.BUILD_ENUM:
+        spec = proto.constants[decoded.bx] if 0 <= decoded.bx < len(proto.constants) else None
+        if isinstance(spec, EnumSpec):
+            ctors = ", ".join(f"{name}/{arity}" for name, arity in spec.constructors)
+            return f"BUILD_ENUM R{decoded.a} {spec.name} ({ctors})"
+        return f"BUILD_ENUM R{decoded.a} <bad spec>"
+    if op is Op.MATCH:
+        spec = proto.constants[decoded.bx] if 0 <= decoded.bx < len(proto.constants) else None
+        if isinstance(spec, MatchSpec):
+            arms = ", ".join(
+                f"{arm.pattern.kind}:{arm.pattern.name}=proto[{arm.function_index}]"
+                for arm in spec.arms
+            )
+            return f"MATCH R{decoded.a} ({arms})"
+        return f"MATCH R{decoded.a} <bad spec>"
     if op is Op.IMPORT:
         spec = proto.constants[decoded.bx] if 0 <= decoded.bx < len(proto.constants) else None
         if isinstance(spec, ImportSpec):

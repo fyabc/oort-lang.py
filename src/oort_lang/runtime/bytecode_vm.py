@@ -9,7 +9,17 @@ instead of silently skipping it.
 
 from __future__ import annotations
 
-from ..bytecode import BytecodeModule, ClassSpec, Decoded, ImportSpec, Proto, decode
+from ..bytecode import (
+    BytecodeModule,
+    ClassSpec,
+    Decoded,
+    EnumSpec,
+    ImportSpec,
+    MatchSpec,
+    PatternSpec,
+    Proto,
+    decode,
+)
 from ..bytecode.opcodes import (
     BINARY_OPCODES,
     UNARY_OPCODES,
@@ -24,8 +34,10 @@ from ..diagnostics.runtime_errors import (
 )
 from ..source.source_position import SourcePosition
 from .environment import DefineResult, Environment
-from .functions import OortVMInvokable
+from .functions import OortNativeFunction, OortVMInvokable
+from .native import NativeMode
 from .objects import (
+    OortADT,
     OortBool,
     OortDict,
     OortFloat,
@@ -36,7 +48,7 @@ from .objects import (
     OortSlice,
     OortTuple,
 )
-from .type_system import OortType
+from .type_system import OortType, SlotDefinition
 
 _BINARY_SYMBOLS = {opcode: symbol for symbol, opcode in BINARY_OPCODES.items()}
 _UNARY_SYMBOLS = {opcode: symbol for symbol, opcode in UNARY_OPCODES.items()}
@@ -78,12 +90,22 @@ class OortVMClosure(OortVMInvokable, OortObject):
     def arity(self) -> int:
         return len(self.proto.params) - (1 if self.proto.has_this else 0)
 
+    @property
+    def is_initializer(self) -> bool:
+        return self.proto.name == "__init__"
+
     def invoke(
         self,
         args: list[OortObject],
         position: SourcePosition | None = None,
     ) -> OortObject:
-        return self.vm.invoke(self, args, position)
+        interpreter = self.vm.interpreter
+        previous = interpreter._current_method
+        interpreter._current_method = self
+        try:
+            return self.vm.invoke(self, args, position)
+        finally:
+            interpreter._current_method = previous
 
     def __repr__(self):
         return f"<Function {self.proto.name}>"
@@ -251,6 +273,72 @@ class BytecodeVM:
                     env,
                 )
                 pc += 1
+            elif op is Op.BUILD_ENUM:
+                spec = constants[decoded.bx]
+                if not isinstance(spec, EnumSpec):
+                    raise OortTypeError("Invalid enum descriptor in bytecode.", position)
+                enum_type = OortType.create_type_object(
+                    spec.name,
+                    bases=[self.interpreter.runtime.types.object_type],
+                )
+                enum_type.adt_variants = dict(spec.constructors)
+                for constructor, arity in spec.constructors:
+                    constructor_value: OortObject
+                    if arity == 0:
+                        constructor_value = OortADT(enum_type, constructor)
+                    else:
+
+                        def construct(
+                            *values: OortObject,
+                            _name: str = constructor,
+                            _arity: int = arity,
+                            _type: OortType = enum_type,
+                        ) -> OortADT:
+                            if len(values) != _arity:
+                                raise TypeError(
+                                    f"Constructor {_name!r} expects {_arity} "
+                                    f"argument(s), got {len(values)}"
+                                )
+                            return OortADT(_type, _name, values)
+
+                        constructor_value = OortNativeFunction(
+                            construct,
+                            name=constructor,
+                            mode=NativeMode.VALUE,
+                        )
+                    self._define_import(env, constructor, constructor_value, position)
+                registers[a] = enum_type
+                pc += 1
+            elif op is Op.MATCH:
+                spec = constants[decoded.bx]
+                if not isinstance(spec, MatchSpec):
+                    raise OortTypeError("Invalid match descriptor in bytecode.", position)
+                scrutinee = registers[proto.scratch_base]
+                for arm in spec.arms:
+                    bindings: dict[str, OortObject] = {}
+                    if not self._match_pattern(arm.pattern, scrutinee, bindings, position):
+                        continue
+                    if not 0 <= arm.function_index < len(module.functions):
+                        raise OortTypeError(
+                            f"Invalid bytecode match arm index {arm.function_index}.",
+                            position,
+                        )
+                    closure = OortVMClosure(
+                        self,
+                        module,
+                        module.functions[arm.function_index],
+                        frame,
+                        env,
+                    )
+                    args = [bindings[name] for name in closure.proto.params]
+                    registers[a] = closure.invoke(args, position)
+                    break
+                else:
+                    raise OortRuntimeError(
+                        f"No match arm matched value {scrutinee!r}.",
+                        position,
+                    )
+                pc += 1
             elif op is Op.BUILD_CLASS:
                 spec = constants[decoded.bx]
                 if not isinstance(spec, ClassSpec):
@@ -284,6 +372,30 @@ class BytecodeVM:
                             env,
                         ),
                     )
+                for slot_name, mutable, initializer_index in spec.slots:
+                    initializer_closure = None
+                    if initializer_index is not None:
+                        if not 0 <= initializer_index < len(module.functions):
+                            raise OortTypeError(
+                                f"Invalid bytecode slot initializer index {initializer_index}.",
+                                position,
+                            )
+                        initializer_closure = OortVMClosure(
+                            self,
+                            module,
+                            module.functions[initializer_index],
+                            frame,
+                            env,
+                        )
+                    cls.slots[slot_name] = SlotDefinition(
+                        name=slot_name,
+                        mutable=mutable,
+                        initializer=None,
+                        closure=env,
+                        position=position,
+                        initializer_callable=initializer_closure,
+                    )
+                cls.static_layout = bool(spec.slots)
                 registers[a] = cls
                 pc += 1
             elif op is Op.DEF_FUN:
@@ -381,6 +493,45 @@ class BytecodeVM:
             else:
                 raise OortTypeError(f"Bytecode VM does not support opcode {op.name}.", position)
         return self.interpreter.runtime.null
+
+    def _match_pattern(
+        self,
+        pattern: PatternSpec,
+        value: OortObject,
+        bindings: dict[str, OortObject],
+        position: SourcePosition,
+    ) -> bool:
+        if pattern.kind == "wildcard":
+            return True
+        if pattern.kind == "name":
+            if isinstance(value, OortADT) and value.type.adt_variants is not None:
+                arity = value.type.adt_variants.get(pattern.name)
+                if arity is not None:
+                    if arity != 0:
+                        raise OortTypeError(
+                            f"Constructor {pattern.name!r} expects {arity} argument(s).",
+                            position,
+                        )
+                    if value.variant != pattern.name:
+                        return False
+                    bindings[pattern.name] = value
+                    return True
+            bindings[pattern.name] = value
+            return True
+        if pattern.kind == "constructor":
+            if not isinstance(value, OortADT) or value.variant != pattern.name:
+                return False
+            if len(value.values) != len(pattern.args):
+                raise OortTypeError(
+                    f"Constructor {pattern.name!r} expects {len(value.values)} "
+                    f"argument(s), got {len(pattern.args)}.",
+                    position,
+                )
+            for subpattern, payload in zip(pattern.args, value.values, strict=True):
+                if not self._match_pattern(subpattern, payload, bindings, position):
+                    return False
+            return True
+        return False
 
     def _define_import(
         self,

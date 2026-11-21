@@ -159,6 +159,58 @@ class Sub < WithInit {}
 print(Sub(9).x)
 """,
     """\
+#lang oort-core
+val base: Int = 10
+class Point {
+    val x: Int = base + 1
+    var y: Int
+    def __init__(y: Int) { this.y = y }
+    def sum() -> Int { this.x + this.y }
+    def bump() -> Int {
+        this.y = this.y + 1
+        this.sum()
+    }
+}
+val p = Point(2)
+print(p.sum(), p.bump(), p.x)
+""",
+    """\
+#lang oort-core
+enum Shape {
+    Circle(radius: Int),
+    Rect(width: Int, height: Int),
+    Empty
+}
+def area(shape: Shape) -> Int {
+    match shape {
+        Circle(r) => r * r * 3,
+        Rect(w, h) => w * h,
+        Empty => 0
+    }
+}
+print(area(Circle(2)), area(Rect(3, 4)), area(Empty))
+print(Circle(1))
+""",
+    """\
+var total = 0
+for i in range(10) {
+    if i == 2: continue
+    if i == 5: break
+    total = total + i
+}
+print(total)
+var j = 0
+while j < 10 {
+    j = j + 1
+    if j == 3: continue
+    if j == 6: break
+    total = total + j
+}
+print(total)
+var early = while true { break 5 }
+print(early)
+""",
+    """\
 class Countdown {
     def __init__(n) { this.n = n }
     def __iter__() { do: this.step() }
@@ -246,6 +298,30 @@ print(facade.value)
     assert out == "loaded\n40 3 42\n40\n"
 
 
+def test_vm_executes_core_modules_with_static_slots(tmp_path, run_file):
+    (tmp_path / "geom.ort").write_text(
+        """#lang oort-core
+class Point {
+    val x: Int = 2
+    var y: Int
+    def __init__(y: Int) { this.y = y }
+    def sum() -> Int { this.x + this.y }
+}
+""",
+        encoding="utf-8",
+    )
+    main = tmp_path / "main.ort"
+    main.write_text(
+        """#lang oort-core
+import "./geom"
+print(geom.Point(3).sum())
+""",
+        encoding="utf-8",
+    )
+    out = run_file(main, target="vm").stdout
+    assert out == "5\n"
+
+
 def test_vm_shares_module_state_and_imports_native_modules(tmp_path, run_file):
     (tmp_path / "counter.ort").write_text(
         """var count = 0
@@ -295,6 +371,25 @@ def test_vm_reports_import_errors(tmp_path, run_file, caplog: pytest.LogCaptureF
     with pytest.raises(CompilerError):
         run_file(cycle, target="vm")
     assert "Circular import detected" in caplog.text
+
+
+def test_vm_reports_match_limitations(caplog: pytest.LogCaptureFixture):
+    compiler = get_compiler(["NOT_EXIST", "-t", "vm"])
+    with pytest.raises(CompilerError):
+        compiler.run_string(
+            """#lang oort-core
+enum E { A, B }
+def f(e: E) -> Int {
+    match e {
+        A => { return 1 },
+        B => 2
+    }
+    3
+}
+f(A)
+"""
+        )
+    assert "return inside a match arm" in caplog.text
 
 
 def test_vm_reports_closure_errors(caplog: pytest.LogCaptureFixture):
@@ -354,5 +449,5 @@ def test_vm_reports_class_errors(caplog: pytest.LogCaptureFixture):
 def test_vm_rejects_unsupported_constructs(caplog: pytest.LogCaptureFixture):
     compiler = get_compiler(["NOT_EXIST", "-t", "vm"])
     with pytest.raises(CompilerError):
-        compiler.run_string("while true { break }\n")
-    assert "HIR backend does not support break/continue" in caplog.text
+        compiler.run_string("def f() { def g() { 1 } }\nf()\n")
+    assert "HIR backend does not support nested function definitions" in caplog.text

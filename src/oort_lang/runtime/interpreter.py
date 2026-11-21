@@ -859,14 +859,17 @@ class ASTInterpreter(ASTVisitor[OortObject]):
     def initialize_instance_slots(self, instance: "OortInstance", class_type: "OortType"):
         """Evaluate declared slot initializers for a fresh instance."""
         for slot in class_type.slot_definitions():
-            if slot.initializer is None:
+            if slot.initializer_callable is not None:
+                value = self.call_value(slot.initializer_callable, [], slot.position)
+            elif slot.initializer is not None:
+                previous_env = self.env
+                self.env = slot.closure
+                try:
+                    value = slot.initializer.accept(self)
+                finally:
+                    self.env = previous_env
+            else:
                 continue
-            previous_env = self.env
-            self.env = slot.closure
-            try:
-                value = slot.initializer.accept(self)
-            finally:
-                self.env = previous_env
             instance.fields[slot.name] = value
 
     def check_instance_slots(self, instance: "OortInstance", class_type: "OortType"):
@@ -874,7 +877,11 @@ class ASTInterpreter(ASTVisitor[OortObject]):
         missing = [
             slot
             for slot in class_type.slot_definitions()
-            if slot.initializer is None and slot.name not in instance.fields
+            if (
+                slot.initializer is None
+                and slot.initializer_callable is None
+                and slot.name not in instance.fields
+            )
         ]
         if missing:
             names = ", ".join(slot.name for slot in missing)

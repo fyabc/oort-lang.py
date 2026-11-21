@@ -20,6 +20,7 @@ from .nodes import (
     BinOp,
     BuildClass,
     BuildDict,
+    BuildEnum,
     BuildList,
     BuildSet,
     BuildSlice,
@@ -43,8 +44,11 @@ from .nodes import (
     LoadLocal,
     LoadOuter,
     MakeClosure,
+    Match,
+    MatchArm,
     Move,
     OpenIterator,
+    Pattern,
     Return,
     SetAttr,
     SetItem,
@@ -74,6 +78,8 @@ class _FunctionState:
     label_counter: int = 0
     is_main: bool = False
     loop_depth: int = 0
+    loop_stack: list[tuple[str, str, int]] = dataclasses.field(default_factory=list)
+    in_match_arm: bool = False
 
 
 class HirLowerer:
@@ -93,27 +99,43 @@ class HirLowerer:
         statements = list(module.body.statements)
         function_defs: dict[int, int] = {}
         class_methods: dict[int, tuple[tuple[nodes.FunctionDef, int], ...]] = {}
+        class_slots: dict[int, tuple[tuple[nodes.VarDecl, int | None], ...]] = {}
         for stmt in statements:
             if isinstance(stmt, nodes.FunctionDef) and not stmt.is_lambda:
                 self._validate_top_level_function(stmt)
                 function_defs[id(stmt)] = self._reserve_function_index()
             elif isinstance(stmt, nodes.ClassDef):
                 methods: list[tuple[nodes.FunctionDef, int]] = []
+                slots: list[tuple[nodes.VarDecl, int | None]] = []
                 self._validate_top_level_class(stmt)
                 for member in stmt.body.statements:
+                    if isinstance(member, nodes.VarDecl):
+                        self._validate_class_slot(member)
+                        initializer = (
+                            None if member.init_value is None else self._reserve_function_index()
+                        )
+                        slots.append((member, initializer))
+                        continue
                     if not isinstance(member, nodes.FunctionDef) or member.is_lambda:
-                        self._reject(member, "class-body statements other than methods")
+                        self._reject(
+                            member,
+                            "class-body statements other than methods or slots",
+                        )
                     self._validate_class_method(member)
                     methods.append((member, self._reserve_function_index()))
                 class_methods[id(stmt)] = tuple(methods)
+                class_slots[id(stmt)] = tuple(slots)
 
-        main = self._lower_main(statements, function_defs, class_methods)
+        main = self._lower_main(statements, function_defs, class_methods, class_slots)
         for stmt in statements:
             if isinstance(stmt, nodes.FunctionDef) and not stmt.is_lambda:
                 self._lower_function(stmt, function_defs[id(stmt)])
             elif isinstance(stmt, nodes.ClassDef):
                 for method, index in class_methods[id(stmt)]:
                     self._lower_method(method, index)
+                for slot, slot_index in class_slots[id(stmt)]:
+                    if slot_index is not None:
+                        self._lower_slot_initializer(slot, slot_index)
         functions = tuple(self._function_slots[index] for index in range(self._next_function_index))
         result = HirModule(main=main, functions=functions)
         validate_module(result)
@@ -144,6 +166,10 @@ class HirLowerer:
         )
         for source, alias in node.names.items():
             self._global_mutability[alias or source] = False
+
+    def _validate_class_slot(self, node: nodes.VarDecl) -> None:
+        if len(node.decl_targets) != 1:
+            self._reject(node, "multi-target slot declarations")
 
     def _validate_top_level_class(self, node: nodes.ClassDef) -> None:
         if len(node.names) != 1:
@@ -184,6 +210,7 @@ class HirLowerer:
         statements: list[nodes.ASTNode],
         function_defs: dict[int, int],
         class_methods: dict[int, tuple[tuple[nodes.FunctionDef, int], ...]],
+        class_slots: dict[int, tuple[tuple[nodes.VarDecl, int | None], ...]],
     ) -> HirFunction:
         state = _FunctionState(name="<main>", code=[], scopes=[{}], is_main=True)
         self._states.append(state)
@@ -204,7 +231,11 @@ class HirLowerer:
                     last = None
                     continue
                 if isinstance(stmt, nodes.ClassDef):
-                    self._lower_class_def(stmt, class_methods[id(stmt)])
+                    self._lower_class_def(
+                        stmt,
+                        class_methods[id(stmt)],
+                        class_slots[id(stmt)],
+                    )
                     last = None
                     continue
                 last = self._lower_stmt(stmt)
@@ -264,9 +295,13 @@ class HirLowerer:
         self,
         node: nodes.ClassDef,
         methods: tuple[tuple[nodes.FunctionDef, int], ...],
+        slots: tuple[tuple[nodes.VarDecl, int | None], ...],
     ) -> None:
         bases = tuple(self._require_value(base) for base in node.bases)
         dst = self._alloc(node.position)
+        slot_specs = [
+            (slot.decl_targets[0].name, slot.mutable, initializer) for slot, initializer in slots
+        ]
         self._emit(
             BuildClass(
                 node.position,
@@ -274,10 +309,74 @@ class HirLowerer:
                 node.name,
                 bases,
                 tuple((method.name, index) for method, index in methods),
+                tuple(slot_specs),
             )
         )
         self._emit(StoreGlobal(node.name_position, node.name, dst))
         self._global_mutability[node.name] = False
+
+    def _lower_slot_initializer(self, node: nodes.VarDecl, index: int) -> HirFunction:
+        name = node.decl_targets[0].name
+        state = _FunctionState(name=f"<slot {name}>", code=[], scopes=[{}])
+        self._states.append(state)
+        try:
+            value = self._require_value(node.init_value)
+            self._emit(Return(node.position, value))
+            result = HirFunction(
+                name=f"<slot {name}>",
+                params=(),
+                local_count=state.max_reg,
+                code=tuple(state.code),
+                position=node.position,
+            )
+        finally:
+            self._states.pop()
+        self._function_slots[index] = result
+        return result
+
+    def _lower_enum_def(self, node: nodes.EnumDef) -> None:
+        dst = self._alloc(node.position)
+        self._emit(
+            BuildEnum(
+                node.position,
+                dst,
+                node.name,
+                tuple((ctor.name, len(ctor.fields)) for ctor in node.constructors),
+            )
+        )
+
+    def _lower_match(self, node: nodes.MatchExpr) -> int:
+        scrutinee = self._require_value(node.scrutinee)
+        arms: list[MatchArm] = []
+        for arm in node.arms:
+            bindings = _pattern_bindings(arm.pattern)
+            index = self._reserve_function_index()
+            state = _FunctionState(
+                name="<match arm>",
+                code=[],
+                scopes=[{}],
+                in_match_arm=True,
+            )
+            self._states.append(state)
+            try:
+                for name in bindings:
+                    self._declare_local(name, mutable=False, position=arm.body.position)
+                value = self._require_value(arm.body)
+                self._emit(Return(arm.body.position, value))
+                function = HirFunction(
+                    name="<match arm>",
+                    params=bindings,
+                    local_count=state.max_reg,
+                    code=tuple(state.code),
+                    position=arm.body.position,
+                )
+            finally:
+                self._states.pop()
+            self._function_slots[index] = function
+            arms.append(MatchArm(_pattern_descriptor(arm.pattern), index))
+        dst = self._alloc(node.position)
+        self._emit(Match(node.position, dst, scrutinee, tuple(arms)))
+        return dst
 
     def _lower_lambda(self, node: nodes.FunctionDef) -> int:
         if self.state.loop_depth:
@@ -353,6 +452,8 @@ class HirLowerer:
         if isinstance(node, nodes.Assignment):
             return self._lower_assignment(node)
         if isinstance(node, nodes.ReturnExpr):
+            if self.state.in_match_arm:
+                self._reject(node, "return inside a match arm")
             if self.state.is_main:
                 self._reject(node, "top-level return")
             value = self._lower_expr(node.value) if node.value is not None else None
@@ -364,10 +465,16 @@ class HirLowerer:
             self._reject(node, "nested imports")
         if isinstance(node, nodes.ClassDef):
             self._reject(node, "nested class definitions")
-        if isinstance(node, (nodes.EnumDef, nodes.MatchExpr)):
-            self._reject(node, type(node).__name__)
-        if isinstance(node, (nodes.BreakExpr, nodes.ContinueExpr)):
-            self._reject(node, "break/continue")
+        if isinstance(node, nodes.EnumDef):
+            self._lower_enum_def(node)
+            return None
+        if isinstance(node, nodes.BreakExpr):
+            value = None if node.value is None else self._require_value(node.value)
+            self._emit_loop_jump(node, break_target=True, value=value)
+            return None
+        if isinstance(node, nodes.ContinueExpr):
+            self._emit_loop_jump(node, break_target=False)
+            return None
         if isinstance(node, nodes.FunctionDef):
             if node.is_lambda:
                 return self._lower_expr(node)
@@ -451,6 +558,10 @@ class HirLowerer:
             return self._lower_name(node)
         if isinstance(node, nodes.ClassDef):
             self._reject(node, "class expressions")
+        if isinstance(node, nodes.EnumDef):
+            self._reject(node, "enum expressions")
+        if isinstance(node, nodes.MatchExpr):
+            return self._lower_match(node)
         if isinstance(node, nodes.UnaryExpr):
             operand = self._require_value(node.operand)
             dst = self._alloc(node.position)
@@ -584,9 +695,11 @@ class HirLowerer:
         condition = self._require_value(node.condition)
         self._emit(JumpIfFalse(node.position, condition, end))
         self.state.loop_depth += 1
+        self.state.loop_stack.append((start, end, result))
         try:
             self._lower_block(node.body)
         finally:
+            self.state.loop_stack.pop()
             self.state.loop_depth -= 1
         self._emit(Jump(node.position, start))
         self._emit(Label(node.position, end))
@@ -614,15 +727,35 @@ class HirLowerer:
             )
             self._emit(StoreLocal(loop_var.position, slot, value))
             self.state.loop_depth += 1
+            self.state.loop_stack.append((start, end, result))
             try:
                 self._lower_block(node.body)
             finally:
+                self.state.loop_stack.pop()
                 self.state.loop_depth -= 1
         finally:
             self._pop_scope()
         self._emit(Jump(node.position, start))
         self._emit(Label(node.position, end))
         return result
+
+    def _emit_loop_jump(
+        self,
+        node: nodes.BreakExpr | nodes.ContinueExpr,
+        *,
+        break_target: bool,
+        value: int | None = None,
+    ) -> None:
+        if not self.state.loop_stack:
+            self._reject(node, "break/continue outside a loop")
+        continue_label, break_label, result = self.state.loop_stack[-1]
+        if break_target:
+            if value is not None:
+                self._emit(Move(node.position, result, value))
+            target = break_label
+        else:
+            target = continue_label
+        self._emit(Jump(node.position, target))
 
     def _lower_block(self, block: nodes.BlockExpr) -> int | None:
         self._push_scope()
@@ -730,6 +863,28 @@ class HirLowerer:
 
 def _is_reserved_method_name(name: str) -> bool:
     return len(name) > 4 and name.startswith("__") and name.endswith("__")
+
+
+def _pattern_bindings(pattern: nodes.Pattern) -> tuple[str, ...]:
+    if isinstance(pattern, nodes.NamePattern):
+        return (pattern.name,)
+    if isinstance(pattern, nodes.ConstructorPattern):
+        return tuple(name for arg in pattern.args for name in _pattern_bindings(arg))
+    return ()
+
+
+def _pattern_descriptor(pattern: nodes.Pattern) -> Pattern:
+    if isinstance(pattern, nodes.WildcardPattern):
+        return Pattern("wildcard")
+    if isinstance(pattern, nodes.NamePattern):
+        return Pattern("name", pattern.name)
+    if isinstance(pattern, nodes.ConstructorPattern):
+        return Pattern(
+            "constructor",
+            pattern.name,
+            tuple(_pattern_descriptor(arg) for arg in pattern.args),
+        )
+    return Pattern("wildcard")
 
 
 def _derive_import_binding(module_path: str) -> str | None:

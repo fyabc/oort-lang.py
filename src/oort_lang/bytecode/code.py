@@ -14,6 +14,31 @@ class ClassSpec:
     name: str
     base_count: int
     methods: tuple[tuple[str, int], ...]
+    slots: tuple[tuple[str, bool, int | None], ...] = ()
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class PatternSpec:
+    kind: str
+    name: str = ""
+    args: tuple["PatternSpec", ...] = ()
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class MatchArmSpec:
+    pattern: PatternSpec
+    function_index: int
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class MatchSpec:
+    arms: tuple[MatchArmSpec, ...]
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class EnumSpec:
+    name: str
+    constructors: tuple[tuple[str, int], ...]
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

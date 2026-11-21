@@ -8,6 +8,7 @@ from oort_lang.diagnostics.syntax_errors import UnsupportedSyntax
 from oort_lang.hir import (
     BuildClass,
     BuildDict,
+    BuildEnum,
     BuildList,
     BuildSlice,
     Call,
@@ -23,6 +24,7 @@ from oort_lang.hir import (
     LoadLocal,
     LoadOuter,
     MakeClosure,
+    Match,
     SetAttr,
     StoreGlobal,
     StoreLocal,
@@ -190,6 +192,78 @@ print(Derived().value())
     assert len(builds[1].bases) == 1
 
 
+def test_core_class_slots_lower_with_initializer_protos():
+    module = lower(
+        """#lang oort-core
+class Point {
+    val x: Int = 1
+    var y: Int
+    def __init__(y: Int) { this.y = y }
+}
+val p = Point(2)
+print(p.x, p.y)
+"""
+    )
+    build = next(i for i in module.main.code if isinstance(i, BuildClass))
+    assert [(name, mutable) for name, mutable, _ in build.slots] == [
+        ("x", False),
+        ("y", True),
+    ]
+    x_initializer = build.slots[0][2]
+    y_initializer = build.slots[1][2]
+    assert x_initializer is not None
+    assert y_initializer is None
+    initializer = module.functions[x_initializer]
+    assert initializer.name == "<slot x>"
+    assert initializer.params == ()
+
+
+def test_core_enums_and_match_lower():
+    module = lower(
+        """#lang oort-core
+enum Shape {
+    Circle(radius: Int),
+    Empty
+}
+def area(shape: Shape) -> Int {
+    match shape {
+        Circle(r) => r * r * 3,
+        Empty => 0
+    }
+}
+print(area(Circle(2)))
+"""
+    )
+    enum = next(i for i in module.main.code if isinstance(i, BuildEnum))
+    assert enum.name == "Shape"
+    assert enum.constructors == (("Circle", 1), ("Empty", 0))
+    match = next(
+        i
+        for i in next(f for f in module.functions if f.name == "area").code
+        if isinstance(i, Match)
+    )
+    assert [arm.pattern.kind for arm in match.arms] == ["constructor", "name"]
+    assert match.arms[0].pattern.args[0].kind == "name"
+    assert module.functions[match.arms[0].function_index].params == ("r",)
+    assert module.functions[match.arms[1].function_index].params == ("Empty",)
+
+
+def test_return_inside_match_arm_is_rejected():
+    with pytest.raises(UnsupportedSyntax, match="return inside a match arm"):
+        lower(
+            """#lang oort-core
+enum E { A, B }
+def f(e: E) -> Int {
+    match e {
+        A => { return 1 },
+        B => 2
+    }
+    3
+}
+"""
+        )
+
+
 def test_calls_accept_function_values_and_subscripts():
     module = lower(
         """val f = do(x): x
@@ -245,7 +319,6 @@ print(true or false)
             "def f() {\n    def g() { 1 }\n    g()\n}\nf()\n",
             "nested function",
         ),
-        ("while true { break }\n", "break/continue"),
         ("var x = 1\nx += 1\n", "augmented assignment"),
     ],
 )

@@ -55,6 +55,7 @@ class SlotDefinition:
     initializer: "nodes.ASTNode | None"
     closure: "Environment"
     position: "SourcePosition"
+    initializer_callable: OortCallableMixin | None = None
 
 
 class OortType(OortInstance, OortCallableMixin):

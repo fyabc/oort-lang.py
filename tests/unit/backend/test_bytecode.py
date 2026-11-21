@@ -5,7 +5,10 @@
 import pytest
 
 from oort_lang.bytecode import (
+    ClassSpec,
+    EnumSpec,
     ImportSpec,
+    MatchSpec,
     Op,
     compile_module,
     decode,
@@ -166,6 +169,54 @@ print(C(1).n)
     text = disassemble_module(module)
     assert "BUILD_CLASS R" in text
     assert "C bases=0" in text
+
+
+def test_core_class_slots_compile_to_class_spec():
+    module = compile_source(
+        """#lang oort-core
+class Point {
+    val x: Int = 1
+    var y: Int
+    def __init__(y: Int) { this.y = y }
+}
+print(Point(2).x)
+"""
+    )
+    spec = next(value for value in module.main.constants if isinstance(value, ClassSpec))
+    assert [(name, mutable) for name, mutable, _ in spec.slots] == [
+        ("x", False),
+        ("y", True),
+    ]
+    text = disassemble_module(module)
+    assert "slots=(x=proto[" in text
+    assert "y)" in text
+
+
+def test_core_enums_and_match_compile():
+    module = compile_source(
+        """#lang oort-core
+enum Shape {
+    Circle(radius: Int),
+    Empty
+}
+def area(shape: Shape) -> Int {
+    match shape {
+        Circle(r) => r * r * 3,
+        Empty => 0
+    }
+}
+print(area(Circle(2)))
+"""
+    )
+    ops = {decode(word).op for word in module.main.code}
+    assert Op.BUILD_ENUM in ops
+    area = next(proto for proto in module.functions if proto.name == "area")
+    assert Op.MATCH in {decode(word).op for word in area.code}
+    assert any(isinstance(value, EnumSpec) for value in module.main.constants)
+    assert any(isinstance(value, MatchSpec) for value in area.constants)
+    text = disassemble_module(module)
+    assert "BUILD_ENUM R" in text
+    assert "MATCH R" in text
 
 
 def test_imports_compile_to_import_opcodes():

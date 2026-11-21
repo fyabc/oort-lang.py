@@ -82,6 +82,36 @@ class BuildClass(Instruction):
     name: str
     bases: tuple[int, ...]
     methods: tuple[tuple[str, int], ...]
+    slots: tuple[tuple[str, bool, int | None], ...] = ()
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Pattern:
+    """Serializable match-pattern descriptor."""
+
+    kind: str
+    name: str = ""
+    args: tuple[Pattern, ...] = ()
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class MatchArm:
+    pattern: Pattern
+    function_index: int
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Match(Instruction):
+    dst: int
+    scrutinee: int
+    arms: tuple[MatchArm, ...]
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class BuildEnum(Instruction):
+    dst: int
+    name: str
+    constructors: tuple[tuple[str, int], ...]
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -250,6 +280,8 @@ def register_reads(instruction: Instruction) -> tuple[int, ...]:
         return ()
     if isinstance(instruction, BuildClass):
         return instruction.bases
+    if isinstance(instruction, Match):
+        return (instruction.scrutinee,)
     if isinstance(instruction, LoadOuter):
         return ()
     if isinstance(instruction, StoreOuter):
@@ -320,6 +352,8 @@ def register_writes(instruction: Instruction) -> tuple[int, ...]:
             LoadOuter,
             MakeClosure,
             BuildClass,
+            BuildEnum,
+            Match,
         ),
     ):
         return (instruction.dst,)
@@ -350,11 +384,23 @@ def validate_module(module: HirModule) -> None:
                     raise ValueError(
                         f"{function.name}: bad function index {instruction.function_index}"
                     )
+            elif isinstance(instruction, Match):
+                for arm in instruction.arms:
+                    if not 0 <= arm.function_index < len(module.functions):
+                        raise ValueError(
+                            f"{function.name}: bad match arm index {arm.function_index}"
+                        )
             elif isinstance(instruction, BuildClass):
                 for method_name, method_index in instruction.methods:
                     if not 0 <= method_index < len(module.functions):
                         raise ValueError(
                             f"{function.name}: bad method index {method_index} for {method_name!r}"
+                        )
+                for slot_name, _, initializer in instruction.slots:
+                    if initializer is not None and not 0 <= initializer < len(module.functions):
+                        raise ValueError(
+                            f"{function.name}: bad slot initializer index {initializer} "
+                            f"for {slot_name!r}"
                         )
             if isinstance(instruction, (LoadOuter, StoreOuter)):
                 if instruction.depth < 1:
