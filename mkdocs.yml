@@ -92,6 +92,7 @@ nav:
       - OP 0016 统一相等性: proposals/0016-equality-protocol.md
       - OP 0017 oort-core 薄探针: proposals/0017-oort-core-thin-probe.md
       - OP 0018 下标与缺失属性协议: proposals/0018-subscript-and-missing-attribute-protocol.md
+      - OP 0019 参数绑定进入 HIR/VM: proposals/0019-hir-vm-parameter-binding.md
   - 设计:
       - 设计索引: design/00-INDEX.md
       - 运行时值表示: design/01-runtime-value-representation.md

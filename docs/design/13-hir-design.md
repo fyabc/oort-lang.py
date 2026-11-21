@@ -1,8 +1,9 @@
 # HIR 设计（共享后端）
 
 > **状态**：HIR、32 位字节码编码/反汇编与寄存器 VM 第一切片已实现，当前子集
-> 包含 lambda/闭包、一等函数值、动态/静态类、模块导入与 `oort-core`
-> 的 ADT/match（`src/oort_lang/hir/`、`bytecode/`、`runtime/bytecode_vm.py`）。
+> 包含 lambda/闭包、一等函数值、完整参数绑定、动态/静态类、模块导入与
+> `oort-core` 的 ADT/match（`src/oort_lang/hir/`、`bytecode/`、
+> `runtime/bytecode_vm.py`）。
 > `-t eval` 仍是默认；差分测试已覆盖当前 HIR 子集，`examples/08_core` 全部
 > 可在 `-t vm` 下运行。字节码 ISA 参考
 > [02-bytecode-vm-design.md](02-bytecode-vm-design.md)，重实现约束见
@@ -39,6 +40,8 @@ HIR 是 AST 与字节码之间的**线性寄存器中间表示**：
 支持的子集：
 
 - 模块顶层 `val`/`var`、赋值、函数定义与调用；
+- 完整参数绑定：默认值、关键字实参、位置/关键字限定、`*args`、`**kwargs`、
+  `&block`；默认值在调用时求值，可引用定义处闭包与更早参数；
 - 函数值/lambda（显式参数与匿名 `$0`/`$1`）、闭包捕获外层局部变量；
 - 模块顶层动态类、实例方法、单/多继承与 `this`；`__init__` 构造与
   `__iter__` 迭代协议方法；
@@ -52,13 +55,14 @@ HIR 是 AST 与字节码之间的**线性寄存器中间表示**：
 - List/Tuple/Set/Dict 字面量、下标读取/赋值、切片（读取与赋值）、属性读写；
 - 一元/二元运算、`and`/`or` 短路；
 - `if`/`else`、`while`、`for`（通过迭代器协议）、块作用域；
-- 模块顶层函数：位置参数、局部变量、递归、`return`。
+- 模块顶层函数：完整参数绑定、局部变量、递归、`return`。
 
 显式拒绝：
 
 - 嵌套函数定义、扩展方法、运算符方法、泛型；
 - 类方法、元类、类体中方法/槽以外的语句、嵌套类与类表达式、`super`；
-- 关键字/默认/变长/块参数；
+- 调用侧 `*`/`**` 展开（`f(*xs)`/`f(**d)`）；匿名 lambda 的关键字实参；
+- 默认表达式引用类体成员（第一切片显式拒绝）；
 - `match` arm 内的 `return`（以及落到 arm 函数后会被当作“循环外”的
   `break`/`continue`）；
 - `val`/参数/外层 `val` 赋值、模块级可变重定义（当前按不可变名处理）；
@@ -86,7 +90,8 @@ HIR 是 AST 与字节码之间的**线性寄存器中间表示**：
 | `BINOP dst op lhs rhs` / `UNOP dst op src` | 运算符，仍走 Oort 语义 |
 | `JUMP label` / `JUMP_FALSE R label` / `JUMP_TRUE R label` | 控制流 |
 | `LABEL name` | 跳转目标 |
-| `CALL dst callee args...` | 调用；参数按显式寄存器列表 |
+| `CALL dst callee args...` | 位置参数快路径调用 |
+| `CALL_KW dst callee args... keywords... block?` | 关键字/块调用；编译为 `CALL_KW` |
 | `RET R` | 函数/主模块返回 |
 | `OPEN_ITER dst iterable` | 打开迭代器（复用现有协议） |
 | `ITER_NEXT value iterator done_label` | 取值；无效时跳到 done |
@@ -125,9 +130,16 @@ HIR 是 AST 与字节码之间的**线性寄存器中间表示**：
 - `CALL` 的被调者是任意表达式：名字、下标、属性或嵌套调用结果都先求值到
   寄存器，再按 scratch 约定调用。因此函数值、`fs[0](x)`、`f(1)(2)` 与
   原生高阶助手（如 `map(xs, do: ...)`）共用同一条路径。
+- 函数签名在 HIR 中显式保存参数种类、固定槽与默认值 proto。`this` 固定槽 0，
+  显式参数从槽 1 开始；参数槽在 lowering 时确定，VM 绑定后直接按槽填帧。
+  默认表达式降低为 `<default ...>` proto，参数为更早的可见参数；运行时仅在
+  参数缺失时调用，默认 proto 闭包按拥有它的函数闭包缓存。
+- `CALL` 无关键字/块时保留位置快路径；有关键字或块时生成 `CALL_KW`，
+  `CallSpec` 记录位置数量、关键字名与块标志。绑定器与解释器共享同一套错误
+  规则；类构造器与方法也走同一绑定器，`this` 预绑定。
 - lambda 降低为独立的 `HirFunction(is_lambda=True)`；显式参数列表与匿名
-  `$0`/`$1` 参数都映射为普通参数槽，定义处生成 `MAKE_CLOSURE`。匿名参数
-  数量由前端记录；第一切片支持位置参数，不支持默认值/变长/块参数。
+  `$0`/`$1` 参数都映射为普通参数槽，定义处生成 `MAKE_CLOSURE`。lambda 与普通
+  函数共用同一 `SignatureSpec`；匿名 `$0`/`$1` 参数为位置限定，不接受关键字。
 - 顶层函数由 `DEF_FUN` 创建，不捕获帧；lambda 由 `MAKE_CLOSURE` 捕获当前帧。
 - 顶层导入按解释器语义**提升**到其他顶层语句之前，并按源码顺序执行；导入
   绑定写入当前模块环境。导入只允许模块顶层（前端已保证），块内/函数内导入
@@ -179,6 +191,10 @@ dump 用于调试。
   scratch 区（`Proto.scratch_base`），`ClassSpec` 记录类名、基类数量、方法
   `(name, proto)` 表与槽 `(name, mutable, initializer proto?)` 表；方法 proto
   以 `has_this` 标记，参数表包含 `this`。
+- `Proto.signature` 保存 `SignatureSpec`：参数种类、槽、默认值 proto 索引与
+  `has_this`。`CALL` 保持 `A=base, C=位置参数数`；`CALL_KW A Bx=K(CallSpec)`
+  的 scratch 布局为 callee、位置值、关键字值、块值。反汇编显示
+  `CALL_KW R6 pos=1 kws=(c)`。
 - 枚举用 `BUILD_ENUM`（ABx：`EnumSpec`）；`match` 用 `MATCH`（ABx：`MatchSpec`，
   arm 模式为 `PatternSpec`）。编译时 scrutinee MOVE 到 scratch 区，scratch
   需求随 `MATCH` 增至至少 1。
@@ -209,6 +225,9 @@ dump 用于调试。
   `OortVMInvokable` 绑定为 `OortVMMethod`（自动前置 `this`）。构造仍走
   `OortType.__call__`：`__init__` 若是 VM 方法则通过 `bind(instance)` 调用，
   因此类可作为 `map` 等原生助手的回调。
+- 参数绑定由 `runtime/call_protocol.py` 的共享核心完成；VM 与 AST 解释器
+  共用错误规则。VM 默认值经默认 proto 闭包求值（按闭包缓存），`*args`
+  为 Tuple、`**kwargs` 为 Dict、缺失块为 `null`；原生函数仍只接受位置实参。
 - 模块通过解释器现有的 `ModuleLoader` 加载：路径解析、缓存、循环检测、方言
   一致性检查与原生模块工厂全部复用；`execute_module` 回调把 AST 降低/编译后
   交给同一个 VM。每个模块使用独立 `Environment`；`OortVMClosure` 记录其模块与
@@ -225,7 +244,8 @@ dump 用于调试。
 
 ## 9. 下一步
 
-1. 扩大差分/错误路径测试，覆盖更多动态示例与边界组合。
-2. 评估把 CLI 默认后端切到 VM（先做性能与兼容性基线）。
-3. 继续优化：寄存器复用、常量内联、当前帧内联、类型特化；用基准证明。
-4. HIR/VM 稳定后再补正式规范（参考 Lua/CPython/JVM）。
+1. 继续扩大 HIR/VM 子集：嵌套函数、多变量 `for`、类方法、扩展/运算符方法。
+2. 扩大差分/错误路径测试，覆盖更多动态示例与边界组合。
+3. 评估把 CLI 默认后端切到 VM（先做性能与兼容性基线）。
+4. 继续优化：寄存器复用、常量内联、当前帧内联、类型特化；用基准证明。
+5. HIR/VM 稳定后再补正式规范（参考 Lua/CPython/JVM）。

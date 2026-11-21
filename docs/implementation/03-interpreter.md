@@ -31,7 +31,7 @@
 - `Bool` 不是 `Int` 的子类型；`Bool` 只登记 `==` / `!=`，不参与算术、位运算
   或大小比较。容器成员测试也对 `Bool`/`Int` 做严格区分。
 - lambda 的匿名参数 `$0` / `$1` 在调用时按位置绑定到 `OortFunction` 的调用
-  环境；arity 由 `FunctionDef.param_count` 提供。
+  环境；参数数量与绑定规则由 `runtime/call_protocol.py` 的签名绑定器提供。
 - `host_value` 是 Python 宿主的投影；原生调用通过 `HostBridge`、`NativeMode`
   与 `NativeContext` 显式处理参数/结果，详见
   [05-stdlib.md](05-stdlib.md) 与

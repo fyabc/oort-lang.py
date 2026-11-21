@@ -40,6 +40,7 @@
 | [0016](0016-equality-protocol.md) | 统一相等性协议（值相等 / 键相等） | Implemented |
 | [0017](0017-oort-core-thin-probe.md) | `oort-core` 薄探针（Int/Float/Bool/String/Unit/函数） | Implemented |
 | [0018](0018-subscript-and-missing-attribute-protocol.md) | 下标与缺失属性协议（`operator "[]"`/`"[]="`、`on_missing`） | Implemented |
+| [0019](0019-hir-vm-parameter-binding.md) | 参数绑定进入 HIR/VM（默认值、关键字、变长、块参数） | Implemented |
 
 ## 流程
 
@@ -92,3 +93,4 @@
 - **先语义后性能**：动态语义稳定前不引入字节码/JIT 复杂度。
 - **元编程最后**：宏与编译期计算依赖稳定的 AST、作用域与类型模型。
 | 2026-11-21 | 下标协议 `operator "[]"`/`"[]="`；缺失属性只读 fallback `on_missing`；不引入 dunder 魔术名与写钩子 | [OP 0018](0018-subscript-and-missing-attribute-protocol.md)（Implemented） |
+| 2026-11-21 | 参数绑定进入 HIR/VM：共享绑定核心、默认值 proto（按闭包缓存）、`CALL_KW`、`SignatureSpec`；移除运行时 arity | [OP 0019](0019-hir-vm-parameter-binding.md)（Implemented） |

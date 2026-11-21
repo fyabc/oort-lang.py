@@ -82,6 +82,10 @@ Oort 需要一个寄存器式字节码 VM 作为动态方言的高性能后端�
 - **模块**：顶层 `import`/`from` 降低为 `IMPORT`；VM 复用现有 `ModuleLoader`
   的路径解析、缓存、循环检测、方言检查与原生模块，并把每个导入模块降低、
   编译到同一 VM 执行。每个模块有独立全局环境，闭包/类方法记住定义模块。
+- **参数绑定**：`runtime/call_protocol.py` 共享绑定核心；HIR/`Proto` 携带
+  `SignatureSpec`，默认值编译为 `<default ...>` proto（按闭包缓存），
+  字节码新增 `CALL_KW`/`CallSpec`。关键字、位置/关键字限定、`*args`、
+  `**kwargs`、`&block` 与构造器/方法绑定均进入 VM；运行时 arity 表面移除。
 - **`oort-core`**：静态类槽（初始化表达式、构造前初始化、只读 `val` 槽）、
   单态 ADT 与 `match`（通配/绑定/嵌套构造器模式，arm 编译为独立函数）、
   `break`/`continue`（含 `break value`）。`examples/08_core` 全部可在
