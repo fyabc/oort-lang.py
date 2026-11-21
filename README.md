@@ -1,6 +1,7 @@
 # Oort Programming Language
 
 [![CI](https://github.com/fyabc/oort-lang/actions/workflows/ci.yml/badge.svg)](https://github.com/fyabc/oort-lang/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/oort-lang.svg)](https://pypi.org/project/oort-lang/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 文档站点：<https://fyabc.github.io/oort-lang/>（规范、提案、设计与示例）
@@ -15,14 +16,15 @@ Oort 的命名来自天文学中的“[奥尔特云](https://en.wikipedia.org/wi
 
 ## 当前状态
 
-当前只有一条执行路径：**树遍历解释器**（动态类型）。语法前端（ANTLR + Pratt）
-解析的语言超集比运行时更大；**未实现的特性会在语义分析阶段显式报错**，不会静默
-产生错误结果。完整的实现/拒绝清单见
+默认执行路径是**树遍历解释器**（动态类型）；共享 HIR 与 32 位字节码的
+**`-t vm` 寄存器 VM** 也已落地，`examples/` 全部示例都能在 VM 下运行。
+语法前端（ANTLR + Pratt）解析的语言超集比运行时更大；**未实现的特性会在语义
+分析阶段显式报错**，不会静默产生错误结果。完整的实现/拒绝清单见
 [规范：实现状态](docs/spec/06-conformance.md)。
 
 开发以**方言垂直切片**为主轴：`oort-object` 动态方言的 v1 已完成；
 `oort-core` 已落地薄探针（`#lang oort-core`，Int/Float/Bool/String/Unit 与
-函数、独立静态检查器、跨方言导入拒绝）；共享字节码后端在两个方言 v1 之后。详见
+函数、独立静态检查器、跨方言导入拒绝）；共享 HIR/字节码/VM 已接通。详见
 [路线图](docs/roadmap.md) 与
 [OP 0001 §5](docs/proposals/0001-feature-layers-and-dialects.md#5-开发模型共享骨架--方言垂直切片2026-11-18-已接受)。
 
@@ -61,7 +63,7 @@ Oort 的命名来自天文学中的“[奥尔特云](https://en.wikipedia.org/wi
 - 泛型 ADT、`Option[T]`/`Result[T,E]`、完整模式匹配与槽 — [OP 0005](docs/proposals/0005-type-system.md)
 - 自定义运算符声明与优先级 — [OP 0002](docs/proposals/0002-dsl-support.md)
 - 宏系统与 `comptime` — [设计笔记](docs/design/05-macro-system-design.md)
-- 字节码 VM 与 LLVM 后端 — [OP 0004](docs/proposals/0004-bytecode-vm.md)
+- VM 性能优化、默认后端切换与 LLVM 后端 — [OP 0004](docs/proposals/0004-bytecode-vm.md)
 - 语言方言（core / object / systems） — [OP 0001](docs/proposals/0001-feature-layers-and-dialects.md)
 
 ## 样例
@@ -80,9 +82,20 @@ Oort 的命名来自天文学中的“[奥尔特云](https://en.wikipedia.org/wi
 
 ## 安装与使用
 
-### 使用 uv（推荐）
+### 从 PyPI 安装（推荐）
+
+要求 Python 3.11+：
 
 ```bash
+pip install oort-lang
+oort --version
+```
+
+### 从源码使用 uv
+
+```bash
+git clone https://github.com/fyabc/oort-lang.git
+cd oort-lang
 pip install uv
 uv sync
 
@@ -99,12 +112,14 @@ oort
 oort test.ort -t ast
 oort test.ort -t astm
 oort test.ort -t bc       # 打印 HIR/字节码反汇编（动态子集）
-oort test.ort -t vm       # 用字节码 VM 执行支持的动态子集
+oort test.ort -t vm       # 用字节码 VM 执行
 ```
 
-### 使用 pip
+### 从源码使用 pip
 
 ```bash
+git clone https://github.com/fyabc/oort-lang.git
+cd oort-lang
 pip install .
 
 oort test.ort

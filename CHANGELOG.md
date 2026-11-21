@@ -6,6 +6,11 @@
 
 ## [Unreleased]
 
+### 文档
+
+- `oort-lang 0.4.0` 已发布到 PyPI；README 增加 PyPI 徽章与 `pip install oort-lang`
+  安装说明，Getting Started 补充 PyPI 与源码安装路径，并链接到发布流程文档。
+
 ## [0.4.0] - 2026-11-22
 
 ### 新增

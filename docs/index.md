@@ -14,7 +14,8 @@ Oort 以“显式优于隐式、正交优于特例、先语义后性能”为准
 
 ## 快速入门
 
-- [开始使用](getting-started.md) — 安装 Oort 并运行第一个程序
+- [开始使用](getting-started.md) — 从 PyPI 或源码安装 Oort 并运行第一个程序
+- [PyPI](https://pypi.org/project/oort-lang/) — `pip install oort-lang`
 - [示例代码](examples.md) — 通过示例学习 Oort 语法
 - [VSCode 插件](https://github.com/fyabc/oort-lang/tree/main/editors/vscode) —
   `.ort` 语法高亮与本地安装

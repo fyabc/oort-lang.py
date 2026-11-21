@@ -1,10 +1,24 @@
 # 开始使用
 
-Oort 目前处于 0.x 阶段，推荐从源码安装。要求 Python 3.11+。
+Oort 目前处于 0.x 阶段，要求 Python 3.11+。可以直接从 PyPI 安装，也可以从
+源码安装以跟踪 `main`。
 
 ## 安装
 
-### 使用 uv（推荐）
+### 从 PyPI 安装（推荐）
+
+```bash
+pip install oort-lang
+oort --version
+```
+
+升级：
+
+```bash
+pip install --upgrade oort-lang
+```
+
+### 从源码使用 uv
 
 ```bash
 git clone https://github.com/fyabc/oort-lang.git
@@ -15,7 +29,7 @@ uv sync
 
 之后用 `uv run oort ...` 或激活虚拟环境后直接使用 `oort`。
 
-### 使用 pip
+### 从源码使用 pip
 
 ```bash
 git clone https://github.com/fyabc/oort-lang.git
