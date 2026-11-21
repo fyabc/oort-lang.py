@@ -11,6 +11,7 @@ from .nodes import (
     BuildTuple,
     Call,
     DefineFunction,
+    GetAttr,
     GetItem,
     HirFunction,
     HirModule,
@@ -26,6 +27,7 @@ from .nodes import (
     Move,
     OpenIterator,
     Return,
+    SetAttr,
     SetItem,
     StoreGlobal,
     StoreLocal,
@@ -71,6 +73,10 @@ def format_instruction(instruction: Instruction) -> str:
             f"BUILD_SLICE R{instruction.dst} "
             f"({instruction.start}, {instruction.stop}, {instruction.step})"
         )
+    if isinstance(instruction, GetAttr):
+        return f"GET_ATTR R{instruction.dst} R{instruction.value}.{instruction.name}"
+    if isinstance(instruction, SetAttr):
+        return f"SET_ATTR R{instruction.value}.{instruction.name} = R{instruction.src}"
     if isinstance(instruction, GetItem):
         return f"GET_ITEM R{instruction.dst} R{instruction.container}[R{instruction.index}]"
     if isinstance(instruction, SetItem):

@@ -75,6 +75,11 @@ var xs = [0, 1, 2, 3]
 xs[1:3] = [9, 8]
 print(xs)
 """,
+    """val xs = [1, 2]
+print(xs.length)
+val d = {: "a": 1 :}
+print(d.length)
+""",
     """\
 for c in "abc" {
     print(c)
@@ -117,6 +122,21 @@ val d = {: "a": 1 :}
 print(d["b"])
 """)
     assert "'b'" in caplog.text
+
+
+def test_vm_reports_attribute_errors(caplog: pytest.LogCaptureFixture):
+    compiler = get_compiler(["NOT_EXIST", "-t", "vm"])
+    with pytest.raises(CompilerError):
+        compiler.run_string("print([1].missing)\n")
+    assert "has no attribute 'missing'" in caplog.text
+
+    compiler = get_compiler(["NOT_EXIST", "-t", "vm"])
+    with pytest.raises(CompilerError):
+        compiler.run_string("""\
+val xs = [1]
+xs.foo = 1
+""")
+    assert "Cannot set attribute 'foo'" in caplog.text
 
 
 def test_vm_returns_last_value():

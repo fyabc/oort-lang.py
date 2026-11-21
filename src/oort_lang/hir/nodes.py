@@ -132,6 +132,20 @@ class BuildSlice(Instruction):
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class GetAttr(Instruction):
+    dst: int
+    value: int
+    name: str
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class SetAttr(Instruction):
+    value: int
+    name: str
+    src: int
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class GetItem(Instruction):
     dst: int
     container: int
@@ -214,6 +228,10 @@ def register_reads(instruction: Instruction) -> tuple[int, ...]:
             for reg in (instruction.start, instruction.stop, instruction.step)
             if reg is not None
         )
+    if isinstance(instruction, GetAttr):
+        return (instruction.value,)
+    if isinstance(instruction, SetAttr):
+        return (instruction.value, instruction.src)
     if isinstance(instruction, GetItem):
         return (instruction.container, instruction.index)
     if isinstance(instruction, SetItem):
@@ -247,6 +265,7 @@ def register_writes(instruction: Instruction) -> tuple[int, ...]:
             BuildSet,
             BuildDict,
             BuildSlice,
+            GetAttr,
             GetItem,
         ),
     ):

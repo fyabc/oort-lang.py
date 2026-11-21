@@ -14,6 +14,7 @@ from ..hir.nodes import (
     BuildTuple,
     Call,
     DefineFunction,
+    GetAttr,
     GetItem,
     HirFunction,
     HirModule,
@@ -29,6 +30,7 @@ from ..hir.nodes import (
     Move,
     OpenIterator,
     Return,
+    SetAttr,
     SetItem,
     StoreGlobal,
     StoreLocal,
@@ -117,11 +119,15 @@ class _ProtoCompiler:
             for instruction in function.code
         )
         has_slice = any(isinstance(instruction, BuildSlice) for instruction in function.code)
+        has_get_attr = any(isinstance(instruction, GetAttr) for instruction in function.code)
+        has_set_attr = any(isinstance(instruction, SetAttr) for instruction in function.code)
+        attr_scratch = 2 if has_set_attr else 1 if has_get_attr else 0
         self.scratch = max(
             self.max_args + 1,
             1 if self.has_iterator else 0,
             1 if has_build else 0,
             3 if has_slice else 0,
+            attr_scratch,
             build_elements,
             build_dict_slots,
         )
@@ -253,6 +259,20 @@ class _ProtoCompiler:
                 encode_abc(Op.BUILD_SLICE, instruction.dst, base, flags),
                 position,
             )
+            return
+        if isinstance(instruction, GetAttr):
+            bx = self._constant(instruction.name, position)
+            base = self.scratch_base
+            self._word(encode_abc(Op.MOVE, base, instruction.value, 0), position)
+            self._word(encode_abx(Op.GET_ATTR, base, bx), position)
+            self._word(encode_abc(Op.MOVE, instruction.dst, base, 0), position)
+            return
+        if isinstance(instruction, SetAttr):
+            bx = self._constant(instruction.name, position)
+            base = self.scratch_base
+            self._word(encode_abc(Op.MOVE, base, instruction.value, 0), position)
+            self._word(encode_abc(Op.MOVE, base + 1, instruction.src, 0), position)
+            self._word(encode_abx(Op.SET_ATTR, base, bx), position)
             return
         if isinstance(instruction, GetItem):
             self._word(

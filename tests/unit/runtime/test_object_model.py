@@ -157,3 +157,13 @@ print(d[b])
     compiler = get_compiler("NOT_EXIST -t eval")
     compiler.run_string(source)
     assert capsys.readouterr().out == "2\n1\n2\n"
+
+
+def test_builtin_objects_reject_attribute_assignment(caplog: pytest.LogCaptureFixture):
+    compiler = get_compiler("NOT_EXIST -t eval")
+    with pytest.raises(CompilerError):
+        compiler.run_string("""\
+val xs = [1]
+xs.foo = 1
+""")
+    assert "Cannot set attribute 'foo'" in caplog.text

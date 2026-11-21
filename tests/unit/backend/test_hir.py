@@ -11,11 +11,13 @@ from oort_lang.hir import (
     BuildSlice,
     Call,
     DefineFunction,
+    GetAttr,
     GetItem,
     JumpIfFalse,
     JumpIfTrue,
     Label,
     LoadLocal,
+    SetAttr,
     StoreGlobal,
     StoreLocal,
     lower_module,
@@ -104,6 +106,18 @@ print(xs[1], {: "a": 1 :}["a"], xs[0:1])
     assert any(isinstance(i, BuildSlice) for i in code)
 
 
+def test_attributes_lower_to_get_and_set():
+    module = lower(
+        """val xs = [1, 2]
+print(xs.length)
+xs.foo = 1
+"""
+    )
+    code = module.main.code
+    assert any(isinstance(i, GetAttr) for i in code)
+    assert any(isinstance(i, SetAttr) for i in code)
+
+
 def test_logical_operators_short_circuit_with_jumps():
     module = lower(
         """\
@@ -120,7 +134,6 @@ print(true or false)
     [
         ("class C {}\n", "ClassDef"),
         ("val f = do: 1\n", "FunctionDef"),
-        ("var x = 1\nprint(x.foo)\n", "Attribute"),
         ("def f(a) { a }\nf(a = 1)\n", "keyword"),
         ("for a, b in [1] { print(a) }\n", "multiple loop"),
         (

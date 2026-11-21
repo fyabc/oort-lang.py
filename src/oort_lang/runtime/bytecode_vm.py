@@ -167,6 +167,14 @@ class BytecodeVM:
                     registers[b + 2] if c & 4 else None,
                 )
                 pc += 1
+            elif op is Op.GET_ATTR:
+                name = str(constants[decoded.bx])
+                registers[a] = self.interpreter.get_attribute(registers[a], name, position)
+                pc += 1
+            elif op is Op.SET_ATTR:
+                name = str(constants[decoded.bx])
+                self.interpreter.set_attribute(registers[a], name, registers[a + 1], position)
+                pc += 1
             elif op is Op.GET_ITEM:
                 try:
                     registers[a] = registers[b][registers[c]]

@@ -116,6 +116,19 @@ print(xs[1], {: "a": 1 :}["a"], xs[0:1])
     assert "BUILD_SLICE" in text
 
 
+def test_attributes_compile_to_attr_opcodes():
+    module = compile_source("""val xs = [1]
+print(xs.length)
+xs.foo = 1
+""")
+    ops = {decode(word).op for word in module.main.code}
+    assert Op.GET_ATTR in ops
+    assert Op.SET_ATTR in ops
+    text = disassemble_module(module)
+    assert "GET_ATTR" in text
+    assert "SET_ATTR" in text
+
+
 def test_disassembly_mentions_protos_and_calls():
     text = disassemble_module(compile_source("def f(a) { a }\nprint(f(1))\n"))
     assert "Proto <main>" in text

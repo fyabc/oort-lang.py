@@ -519,57 +519,72 @@ class ASTInterpreter(ASTVisitor[OortObject]):
         else:
             assert isinstance(lhs, nodes.Attribute)
             assert lhs.ctx == nodes.LValueContext.STORE
-
             value = lhs.value.accept(self)
-            if value.is_native:
-                raise OortTypeError(
-                    f"Cannot set attribute {lhs.attribute!r} to native object", lhs.position
-                )
+            self.set_attribute(value, lhs.attribute, rhs, lhs.position)
 
-            assert isinstance(value, OortInstance)
-            if isinstance(value, OortType):
-                # Writing through a class object must not replace methods or
-                # class methods inherited from the class/metaclass MRO.
-                if find_callable_class_member(lhs.attribute, value) is not None:
-                    raise OortAttributeError(
-                        f"Cannot shadow method {lhs.attribute!r} with a class attribute",
-                        lhs.position,
-                    )
-            elif find_callable_class_member(lhs.attribute, value.type) is not None:
+    def set_attribute(
+        self,
+        value: OortObject,
+        name: str,
+        new_value: OortObject,
+        position: SourcePosition,
+    ) -> None:
+        """Assign an attribute on an already-evaluated receiver."""
+        if value.is_native:
+            raise OortTypeError(f"Cannot set attribute {name!r} to native object", position)
+        if not isinstance(value, OortInstance):
+            raise OortTypeError(
+                f"Cannot set attribute {name!r} on {value.type.name!r} object",
+                position,
+            )
+
+        if isinstance(value, OortType):
+            # Writing through a class object must not replace methods or
+            # class methods inherited from the class/metaclass MRO.
+            if find_callable_class_member(name, value) is not None:
                 raise OortAttributeError(
-                    f"Cannot shadow method {lhs.attribute!r} with an instance field",
-                    lhs.position,
+                    f"Cannot shadow method {name!r} with a class attribute",
+                    position,
                 )
+        elif find_callable_class_member(name, value.type) is not None:
+            raise OortAttributeError(
+                f"Cannot shadow method {name!r} with an instance field",
+                position,
+            )
 
-            if value.type.static_layout and not isinstance(value, OortType):
-                slot = value.type.find_slot(lhs.attribute)
-                if slot is None:
+        if value.type.static_layout and not isinstance(value, OortType):
+            slot = value.type.find_slot(name)
+            if slot is None:
+                raise OortAttributeError(
+                    f"Class {value.type.name!r} has no slot {name!r}",
+                    position,
+                )
+            if not slot.mutable:
+                current_method = self._current_method
+                is_initializer = getattr(current_method, "is_initializer", False)
+                if not (is_initializer and name not in value.fields):
                     raise OortAttributeError(
-                        f"Class {value.type.name!r} has no slot {lhs.attribute!r}",
-                        lhs.position,
+                        f"Cannot assign to read-only slot {name!r}",
+                        position,
                     )
-                if not slot.mutable:
-                    current_method = self._current_method
-                    is_initializer = getattr(current_method, "is_initializer", False)
-                    if not (is_initializer and lhs.attribute not in value.fields):
-                        raise OortAttributeError(
-                            f"Cannot assign to read-only slot {lhs.attribute!r}",
-                            lhs.position,
-                        )
-            value.set(lhs.attribute, rhs)
+        value.set(name, new_value)
 
-    def visit_attribute(self, node: nodes.Attribute) -> OortObject:
-        value = node.value.accept(self)
-
-        result = value.get(node.attribute)
+    def get_attribute(
+        self,
+        value: OortObject,
+        name: str,
+        position: SourcePosition,
+    ) -> OortObject:
+        """Resolve an attribute on an already-evaluated value."""
+        result = value.get(name)
         if result is not None:
             return result
 
         # `super` searches class members only; extensions are never a fallback.
         if isinstance(value, OortSuperProxy):
             raise OortAttributeError(
-                f"Type {value.receiver.type.name!r} has no super attribute {node.attribute!r}",
-                node.position,
+                f"Type {value.receiver.type.name!r} has no super attribute {name!r}",
+                position,
             )
 
         if (
@@ -577,15 +592,13 @@ class ASTInterpreter(ASTVisitor[OortObject]):
             and not isinstance(value, OortType)
             and value.type.static_layout
         ):
-            slot = value.type.find_slot(node.attribute)
-            if slot is not None and node.attribute not in value.fields:
-                raise OortAttributeError(
-                    f"Slot {node.attribute!r} is not initialized", node.position
-                )
+            slot = value.type.find_slot(name)
+            if slot is not None and name not in value.fields:
+                raise OortAttributeError(f"Slot {name!r} is not initialized", position)
 
-        lookup = self.env.lookup_extension(value.type, node.attribute)
+        lookup = self.env.lookup_extension(value.type, name)
         if lookup.ambiguous:
-            raise OortAttributeError(self._ambiguous_extension_message(lookup), node.position)
+            raise OortAttributeError(self._ambiguous_extension_message(lookup), position)
         if lookup.match is not None:
             return _bind_extension_method(value, lookup.match.func, lookup.match.target)
 
@@ -598,15 +611,17 @@ class ASTInterpreter(ASTVisitor[OortObject]):
                     try:
                         return self.call_value(
                             hook,
-                            [OortString(node.attribute)],
-                            node.position,
+                            [OortString(name)],
+                            position,
                         )
                     finally:
                         self._missing_hook_receivers.discard(receiver_id)
 
-        raise OortAttributeError(
-            f"{value.type.name!r} object has no attribute {node.attribute!r}", node.position
-        )
+        raise OortAttributeError(f"{value.type.name!r} object has no attribute {name!r}", position)
+
+    def visit_attribute(self, node: nodes.Attribute) -> OortObject:
+        value = node.value.accept(self)
+        return self.get_attribute(value, node.attribute, node.position)
 
     @staticmethod
     def _ambiguous_extension_message(

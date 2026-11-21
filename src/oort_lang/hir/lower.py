@@ -23,6 +23,7 @@ from .nodes import (
     BuildTuple,
     Call,
     DefineFunction,
+    GetAttr,
     GetItem,
     HirFunction,
     HirModule,
@@ -38,6 +39,7 @@ from .nodes import (
     Move,
     OpenIterator,
     Return,
+    SetAttr,
     SetItem,
     StoreGlobal,
     StoreLocal,
@@ -226,6 +228,11 @@ class HirLowerer:
     def _lower_assignment(self, node: nodes.Assignment) -> int | None:
         if node.op.text != "=":
             self._reject(node, "augmented assignment")
+        if isinstance(node.lhs, nodes.Attribute):
+            receiver = self._require_value(node.lhs.value)
+            rhs_value = self._require_value(node.rhs)
+            self._emit(SetAttr(node.lhs.position, receiver, node.lhs.attribute, rhs_value))
+            return None
         if isinstance(node.lhs, nodes.Subscript):
             container = self._require_value(node.lhs.value)
             index = self._require_value(node.lhs.index)
@@ -310,6 +317,11 @@ class HirLowerer:
             index = self._require_value(node.index)
             dst = self._alloc(node.position)
             self._emit(GetItem(node.position, dst, container, index))
+            return dst
+        if isinstance(node, nodes.Attribute):
+            receiver = self._require_value(node.value)
+            dst = self._alloc(node.position)
+            self._emit(GetAttr(node.position, dst, receiver, node.attribute))
             return dst
         if isinstance(node, nodes.SliceLiteral):
             start = None if node.start is None else self._require_value(node.start)

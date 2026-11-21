@@ -73,6 +73,10 @@ def _format(proto: Proto, pc: int, decoded: Decoded) -> str:
         return f"{op.name} R{decoded.a} base=R{decoded.b} count={decoded.c}"
     if op is Op.NEW_DICT:
         return f"NEW_DICT R{decoded.a} base=R{decoded.b} pairs={decoded.c}"
+    if op is Op.GET_ATTR:
+        return f"GET_ATTR R{decoded.a} {_const(proto, decoded.bx)}"
+    if op is Op.SET_ATTR:
+        return f"SET_ATTR R{decoded.a} {_const(proto, decoded.bx)}"
     if op is Op.GET_ITEM:
         return f"GET_ITEM R{decoded.a} R{decoded.b}[R{decoded.c}]"
     if op is Op.SET_ITEM:
