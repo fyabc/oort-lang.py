@@ -5,6 +5,8 @@
 各运行时的 JIT/GC/整数语义、启动与预热差异都会影响结果。
 
 主对比始终是 **Oort 树遍历解释器 vs Oort VM**（同程序、同结果、同机）。
+跨语言套件同时运行这两个 Oort 后端；输出中的 `vs Oort eval` 以树遍历解释器
+为基准，因此 Oort VM 行的该值就是 VM 相对解释器的加速。
 预算与目标见 `docs/design/08-performance-benchmarking.md`；结果见
 [../RESULTS.md](../RESULTS.md)。
 

@@ -160,6 +160,13 @@ class Sub < WithInit {}
 print(Sub(9).x)
 """,
     """\
+var total = 0
+for k, v in [(1, 10), [2, 20], (3, 30)] {
+    total = total + k * v
+}
+print(total)
+""",
+    """\
 #lang oort-core
 val base: Int = 10
 class Point {
@@ -486,6 +493,18 @@ def test_vm_reports_binding_errors(
     with pytest.raises(CompilerError):
         compiler.run_string(source)
     assert detail in caplog.text
+
+
+def test_vm_reports_loop_unpack_errors(caplog: pytest.LogCaptureFixture):
+    compiler = get_compiler(["NOT_EXIST", "-t", "vm"])
+    with pytest.raises(CompilerError):
+        compiler.run_string("for a, b in [(1, 2, 3)] { print(a) }\n")
+    assert "Cannot unpack 3 value(s) into 2 loop variable(s)" in caplog.text
+
+    compiler = get_compiler(["NOT_EXIST", "-t", "vm"])
+    with pytest.raises(CompilerError):
+        compiler.run_string("for a, b in [1] { print(a) }\n")
+    assert "Cannot unpack a non-tuple value in for loop" in caplog.text
 
 
 def test_vm_reports_duplicate_block(caplog: pytest.LogCaptureFixture):

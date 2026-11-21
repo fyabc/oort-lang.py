@@ -237,6 +237,19 @@ print(f(1, c = 3))
     assert "kws=(c)" in text
 
 
+def test_multiple_loop_variables_compile_to_unpack():
+    module = compile_source(
+        """for k, v in [(1, 2)] {
+    print(k, v)
+}
+"""
+    )
+    ops = {decode(word).op for word in module.main.code}
+    assert Op.UNPACK in ops
+    text = disassemble_module(module)
+    assert "UNPACK R" in text
+
+
 def test_imports_compile_to_import_opcodes():
     module = compile_source(
         """import "./lib"

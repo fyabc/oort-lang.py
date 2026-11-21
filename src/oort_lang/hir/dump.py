@@ -40,6 +40,7 @@ from .nodes import (
     StoreLocal,
     StoreOuter,
     UnOp,
+    Unpack,
 )
 
 
@@ -135,6 +136,11 @@ def format_instruction(instruction: Instruction) -> str:
         return f"OPEN_ITER R{instruction.dst} R{instruction.iterable}"
     if isinstance(instruction, IteratorNext):
         return f"ITER_NEXT R{instruction.value_dst} R{instruction.iterator} -> {instruction.done}"
+    if isinstance(instruction, Unpack):
+        return (
+            f"UNPACK R{instruction.source} -> "
+            f"R{instruction.base}..R{instruction.base + instruction.count - 1}"
+        )
     return type(instruction).__name__
 
 

@@ -29,6 +29,7 @@ from oort_lang.hir import (
     StoreGlobal,
     StoreLocal,
     StoreOuter,
+    Unpack,
     lower_module,
     validate_module,
 )
@@ -76,6 +77,18 @@ print(g)
     assert not any(isinstance(i, StoreGlobal) and i.name == "x" for i in code)
     assert any(isinstance(i, StoreLocal) for i in code)
     assert any(isinstance(i, LoadLocal) for i in code)
+
+
+def test_multiple_loop_variables_lower_to_unpack():
+    module = lower(
+        """for k, v in [(1, 2)] {
+    print(k, v)
+}
+"""
+    )
+    unpack = next(i for i in module.main.code if isinstance(i, Unpack))
+    assert unpack.count == 2
+    assert unpack.source != unpack.base
 
 
 def test_branches_and_loops_have_matching_labels():
@@ -404,7 +417,6 @@ print(true or false)
 @pytest.mark.parametrize(
     ("source", "detail"),
     [
-        ("for a, b in [1] { print(a) }\n", "multiple loop"),
         ("var x = 1\nx += 1\n", "augmented assignment"),
         ("...\n", "ellipsis"),
         ("val d = {: **other :}\n", "dict unpacking"),

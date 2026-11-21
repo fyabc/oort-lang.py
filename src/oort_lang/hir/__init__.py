@@ -44,6 +44,7 @@ from .nodes import (
     StoreLocal,
     StoreOuter,
     UnOp,
+    Unpack,
     validate_module,
 )
 
@@ -88,6 +89,7 @@ __all__ = [
     "StoreLocal",
     "StoreOuter",
     "UnOp",
+    "Unpack",
     "format_function",
     "format_instruction",
     "format_module",

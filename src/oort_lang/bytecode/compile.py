@@ -44,6 +44,7 @@ from ..hir.nodes import (
     StoreLocal,
     StoreOuter,
     UnOp,
+    Unpack,
 )
 from ..source.source_position import SourcePosition
 from .code import (
@@ -428,6 +429,17 @@ class _ProtoCompiler:
                     instruction.dst,
                     instruction.iterable,
                     0,
+                ),
+                position,
+            )
+            return
+        if isinstance(instruction, Unpack):
+            self._word(
+                encode_abc(
+                    Op.UNPACK,
+                    instruction.source,
+                    instruction.base,
+                    instruction.count,
                 ),
                 position,
             )

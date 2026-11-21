@@ -42,6 +42,7 @@ from oort_lang.hir import (
     StoreLocal,
     StoreOuter,
     UnOp,
+    Unpack,
     format_function,
     format_instruction,
     format_module,
@@ -116,6 +117,7 @@ def test_every_instruction_has_a_readable_dump():
         (Return(p, 0), "RET R0"),
         (OpenIterator(p, 0, 1), "OPEN_ITER R0 R1"),
         (IteratorNext(p, 0, 1, "done"), "ITER_NEXT R0 R1 -> done"),
+        (Unpack(p, 0, 2, 3), "UNPACK R0 -> R2..R4"),
     ]
     for instruction, expected in instructions:
         assert format_instruction(instruction) == expected

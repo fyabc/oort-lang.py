@@ -259,6 +259,13 @@ class IteratorNext(Instruction):
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class Unpack(Instruction):
+    source: int
+    base: int
+    count: int
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class HirFunction:
     name: str
     params: tuple[str, ...]
@@ -336,6 +343,8 @@ def register_reads(instruction: Instruction) -> tuple[int, ...]:
         return (instruction.iterable,)
     if isinstance(instruction, IteratorNext):
         return (instruction.iterator,)
+    if isinstance(instruction, Unpack):
+        return (instruction.source,)
     return ()
 
 
@@ -369,6 +378,8 @@ def register_writes(instruction: Instruction) -> tuple[int, ...]:
         return (instruction.dst,)
     if isinstance(instruction, IteratorNext):
         return (instruction.value_dst,)
+    if isinstance(instruction, Unpack):
+        return tuple(range(instruction.base, instruction.base + instruction.count))
     return ()
 
 

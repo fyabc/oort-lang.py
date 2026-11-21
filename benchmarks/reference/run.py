@@ -30,6 +30,7 @@ WORKLOADS = {
 
 EXTENSIONS = {
     "oort": ".ort",
+    "oort-vm": ".ort",
     "python": ".py",
     "node": ".js",
     "ruby": ".rb",
@@ -38,6 +39,7 @@ EXTENSIONS = {
 
 VERSION_ARGS = {
     "oort": ["--version"],
+    "oort-vm": ["--version"],
     "python": ["--version"],
     "node": ["--version"],
     "ruby": ["--version"],
@@ -53,6 +55,8 @@ def runtime_command(name: str, overrides: dict[str, str]) -> list[str] | None:
     """Return the base command for a runtime, or None if unavailable."""
     if name == "oort":
         return [sys.executable, "-m", "oort_lang"]
+    if name == "oort-vm":
+        return [sys.executable, "-m", "oort_lang", "-t", "vm"]
     if name == "python":
         return [sys.executable]
     if name in overrides:
@@ -244,7 +248,7 @@ def main() -> int:
     for name, version in versions.items():
         print(f"  {name}: {version}")
     print()
-    print("| runtime | workload | exec ms | vs Python | vs Oort |")
+    print("| runtime | workload | exec ms | vs Python | vs Oort eval |")
     print("|---|---|---:|---:|---:|")
     for name in bases:
         for workload in workload_names:
@@ -258,6 +262,7 @@ def main() -> int:
     print()
     print("exec ms is measured inside each program, excluding process startup.")
     print("`vs X` is X's exec time divided by this runtime's exec time; >1 is faster.")
+    print("The Oort VM row's vs Oort eval value is its speedup over the tree-walker.")
     print("Startup (empty program, process wall clock):")
     for name, raw in startup.items():
         print(f"  {name}: {raw * 1e3:.1f} ms")

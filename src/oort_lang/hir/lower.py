@@ -57,6 +57,7 @@ from .nodes import (
     StoreLocal,
     StoreOuter,
     UnOp,
+    Unpack,
     validate_module,
 )
 
@@ -845,8 +846,8 @@ class HirLowerer:
         return result
 
     def _lower_for(self, node: nodes.ForExpr) -> int:
-        if len(node.vars) != 1:
-            self._reject(node, "multiple loop variables")
+        if not node.vars:
+            self._reject(node, "loop without variables")
         result = self._const(None, node.position)
         iterable = self._require_value(node.iterator)
         iterator = self._alloc(node.position)
@@ -856,15 +857,27 @@ class HirLowerer:
         self._emit(Label(node.position, start))
         value = self._alloc(node.position)
         self._emit(IteratorNext(node.position, value, iterator, end))
-        loop_var = node.vars[0]
         self._push_scope()
         try:
-            slot = self._declare_local(
-                loop_var.name,
-                mutable=False,
-                position=loop_var.position,
-            )
-            self._emit(StoreLocal(loop_var.position, slot, value))
+            slots = [
+                self._declare_local(
+                    loop_var.name,
+                    mutable=False,
+                    position=loop_var.position,
+                )
+                for loop_var in node.vars
+            ]
+            if len(slots) == 1:
+                self._emit(StoreLocal(node.vars[0].position, slots[0], value))
+            else:
+                self._emit(
+                    Unpack(
+                        node.position,
+                        value,
+                        slots[0],
+                        len(slots),
+                    )
+                )
             self.state.loop_depth += 1
             self.state.loop_stack.append((start, end, result))
             try:

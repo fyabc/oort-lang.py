@@ -735,6 +735,22 @@ class BytecodeVM:
                 registers[a] = self.interpreter.runtime.null if value is None else value
                 registers[c] = OortBool.get_bool_value(valid)
                 pc += 1
+            elif op is Op.UNPACK:
+                item = registers[a]
+                if not isinstance(item, (OortTuple, OortList)):
+                    raise OortTypeError(
+                        "Cannot unpack a non-tuple value in for loop",
+                        position,
+                    )
+                values = list(item.value)
+                if len(values) != c:
+                    raise OortTypeError(
+                        f"Cannot unpack {len(values)} value(s) into {c} loop variable(s)",
+                        position,
+                    )
+                for index, element in enumerate(values):
+                    registers[b + index] = element
+                pc += 1
             elif op is Op.EXTEND:
                 pc += 1
             else:

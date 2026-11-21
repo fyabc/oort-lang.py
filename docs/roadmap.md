@@ -95,7 +95,7 @@ P1 已完成。后续打磨（P2）：
 已落地（线性寄存器指令、动态子集 lowering、集合/下标/切片/属性、`-t bc`/`-t vm`、
 寄存器 VM、lambda/闭包、一等函数值、动态/静态类、模块导入、core 的
 ADT/match 与完整参数绑定）。`examples/08_core` 已全部在 VM 下运行，
-`examples/` 还有多变量 `for`、类方法、扩展/运算符方法等待补；
+`examples/` 还有循环内创建闭包、类方法、扩展/运算符方法等待补；
 当前 VM 已覆盖主要宏基准，但 loop 仍接近 2× 目标、完整子集相对早期切片有
 回退；最新数字见
 [`benchmarks/RESULTS.md`](https://github.com/fyabc/oort-lang.py/blob/main/benchmarks/RESULTS.md)。

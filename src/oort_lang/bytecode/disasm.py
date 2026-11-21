@@ -129,6 +129,9 @@ def _format(proto: Proto, pc: int, decoded: Decoded) -> str:
         return f"OPEN_ITER R{decoded.a} R{decoded.b}"
     if op is Op.ITER_NEXT:
         return f"ITER_NEXT R{decoded.a} R{decoded.b} R{decoded.c}"
+    if op is Op.UNPACK:
+        end = decoded.b + decoded.c - 1
+        return f"UNPACK R{decoded.a} -> R{decoded.b}..R{end}"
     if op in (Op.NEW_LIST, Op.NEW_TUPLE, Op.NEW_SET):
         return f"{op.name} R{decoded.a} base=R{decoded.b} count={decoded.c}"
     if op is Op.NEW_DICT:

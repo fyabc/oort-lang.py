@@ -44,6 +44,7 @@ HIR 是 AST 与字节码之间的**线性寄存器中间表示**：
   `&block`；默认值在调用时求值，可引用定义处闭包与更早参数；
 - 函数值/lambda（显式参数与匿名 `$0`/`$1`）、嵌套具名函数（含自递归）、
   闭包捕获外层局部变量；
+- 多变量 `for` 解包（Tuple/List 元素，运行期校验长度）；
 - 模块顶层动态类、实例方法、单/多继承与 `this`；`__init__` 构造与
   `__iter__` 迭代协议方法；
 - 顶层 `import` / `from ... import ...`（含别名、相对路径与 `-I` 搜索路径）；
@@ -96,6 +97,7 @@ HIR 是 AST 与字节码之间的**线性寄存器中间表示**：
 | `RET R` | 函数/主模块返回 |
 | `OPEN_ITER dst iterable` | 打开迭代器（复用现有协议） |
 | `ITER_NEXT value iterator done_label` | 取值；无效时跳到 done |
+| `UNPACK source base count` | 多变量 `for` 解包到连续槽 |
 | `BUILD_LIST/TUPLE/SET dst elements` | 集合字面量 |
 | `BUILD_DICT dst key:value...` | 字典字面量 |
 | `GET_ITEM dst container index` / `SET_ITEM container index src` | 下标读写 |
@@ -121,8 +123,9 @@ HIR 是 AST 与字节码之间的**线性寄存器中间表示**：
   循环结果寄存器，保持循环表达式的值语义。
 - 寄存器单调分配，不复用；上限 256（与设计 02 的 A/B/C 8 位字段一致）。
   超过上限报 `UnsupportedSyntax`。后续由寄存器分配器复用临时值。
-- `for` 循环变量按局部槽处理；循环体复用同一帧，因此循环内创建 lambda 会
-  共享最后一次迭代的绑定。第一切片在 lowering 阶段显式拒绝这种写法。
+- `for` 循环变量按局部槽处理；多变量 `for` 用 `UNPACK` 把 Tuple/List 元素
+  写入连续槽。循环体复用同一帧，因此循环内创建 lambda/嵌套函数会共享最后一次
+  迭代的绑定；第一切片在 lowering 阶段显式拒绝这种写法。
 
 ## 5. 函数与调用
 
@@ -190,6 +193,8 @@ dump 用于调试。
 - 闭包用 `LOAD_OUTER`/`STORE_OUTER`（ABC：depth/slot 各 8 位）与
   `MAKE_CLOSURE`（ABx：proto 索引）。lambda proto 与顶层函数共用
   `BytecodeModule.functions`，由 `is_lambda` 仅在 HIR 层区分。
+- 多变量 `for` 用 `UNPACK`（ABC：source、目标起始槽、变量数）；VM 校验元素为
+  Tuple/List 且数量匹配，否则报与解释器相同的错误。
 - 类用 `BUILD_CLASS`（ABx：常量池中的 `ClassSpec`）。基类寄存器先 MOVE 到
   scratch 区（`Proto.scratch_base`），`ClassSpec` 记录类名、基类数量、方法
   `(name, proto)` 表与槽 `(name, mutable, initializer proto?)` 表；方法 proto
@@ -247,7 +252,7 @@ dump 用于调试。
 
 ## 9. 下一步
 
-1. 继续扩大 HIR/VM 子集：多变量 `for`、类方法、扩展/运算符方法。
+1. 继续扩大 HIR/VM 子集：类方法、扩展/运算符方法、循环内创建闭包。
 2. 扩大差分/错误路径测试，覆盖更多动态示例与边界组合。
 3. 评估把 CLI 默认后端切到 VM（先做性能与兼容性基线）。
 4. 继续优化：寄存器复用、常量内联、当前帧内联、类型特化；用基准证明。

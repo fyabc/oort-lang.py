@@ -36,14 +36,19 @@ def test_report_renders_pytest_vm_reference_and_history():
     }
     reference = {
         "repeat": 3,
-        "runtimes": ["oort", "python"],
-        "versions": {"oort": "Oort 0.3.1", "python": "Python 3.12.0"},
+        "runtimes": ["oort", "oort-vm", "python"],
+        "versions": {
+            "oort": "Oort 0.3.1",
+            "oort-vm": "Oort 0.3.1",
+            "python": "Python 3.12.0",
+        },
         "runtime_overrides": {},
         "exec_ms": {
             "oort": {"fib": 100.0, "loop": 50.0, "methods": 25.0},
+            "oort-vm": {"fib": 50.0, "loop": 25.0, "methods": 10.0},
             "python": {"fib": 1.0, "loop": 1.0, "methods": 1.0},
         },
-        "startup_ms": {"oort": 400.0, "python": 40.0},
+        "startup_ms": {"oort": 400.0, "oort-vm": 450.0, "python": 40.0},
     }
     history = [
         {
@@ -67,6 +72,7 @@ def test_report_renders_pytest_vm_reference_and_history():
     assert "200.0 ms" in text
     assert "100.0 ms" in text
     assert "**2.00" in text
+    assert "Oort VM" in text
     assert "Python 3.12.0" in text
     assert "Test CPU" in text
     assert "5.00" in text

@@ -217,6 +217,7 @@ def _reference_section(reference: dict[str, Any]) -> list[str]:
         version = versions.get(runtime, "")
         name = {
             "oort": "Oort 树遍历",
+            "oort-vm": "Oort VM",
             "python": "Python",
             "node": "Node",
             "ruby": "Ruby",
@@ -234,17 +235,18 @@ def _reference_section(reference: dict[str, Any]) -> list[str]:
         lines.append(f"| {name} | " + " | ".join(values) + " |")
 
     ratios = []
-    for workload in workloads:
-        oort = exec_ms.get("oort", {}).get(workload)
-        python = exec_ms.get("python", {}).get(workload)
-        if isinstance(oort, (int, float)) and isinstance(python, (int, float)) and python > 0:
-            ratios.append(float(oort) / float(python))
+    for runtime in ("oort", "oort-vm"):
+        for workload in workloads:
+            oort = exec_ms.get(runtime, {}).get(workload)
+            python = exec_ms.get("python", {}).get(workload)
+            if isinstance(oort, (int, float)) and isinstance(python, (int, float)) and python > 0:
+                ratios.append(float(oort) / float(python))
     lines.append("")
     if ratios:
         low = min(ratios)
         high = max(ratios)
         lines.append(
-            f"当前 Oort 约为 CPython 的 **{low:.0f}–{high:.0f} 倍**耗时。"
+            f"当前 Oort（解释器及 VM）约为 CPython 的 **{low:.0f}–{high:.0f} 倍**耗时。"
             "Node 的优化 JIT 可能折叠简单循环/字段更新，其数字只作下限；"
             "Ruby/Lua 作语境参考。"
         )

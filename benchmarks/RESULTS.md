@@ -3,7 +3,7 @@
 > 本文件由 `benchmarks/report.py` 从机器可读结果生成，请勿手改数字。
 > 手工维护的只有 `benchmarks/history.json` 的历史里程碑元数据。
 > 快照日期：2026-11-21  
-> 提交：`7ae89f7+dirty`  
+> 提交：`36f2ea5+dirty`  
 > 环境：AMD Ryzen 7 5800H with Radeon Graphics / Windows 11 / Python 3.12.12  
 > 版本：Oort 0.3.1
 
@@ -16,8 +16,8 @@ benchmark 工作流维护。
 
 ```bash
 uv run --frozen pytest benchmarks/ -q --benchmark-json=benchmark.json
-uv run --frozen python benchmarks/reference/run.py --repeat 3 --runtime oort --runtime python --runtime node --runtime 'ruby=D:\Softwares\Ruby40-x64\bin\ruby.exe' --runtime 'lua=D:\Softwares\lua-5.4.8\lua.exe' --json > reference.json
-uv run --frozen python benchmarks/report.py --benchmark benchmark.json --reference reference.json
+uv run --frozen python benchmarks/reference/run.py --repeat 3 --runtime oort --runtime oort-vm --runtime python --runtime node --runtime 'ruby=D:\Softwares\Ruby40-x64\bin\ruby.exe' --runtime 'lua=D:\Softwares\lua-5.4.8\lua.exe' --json > refvm.json
+uv run --frozen python benchmarks/report.py --benchmark benchmark.json --reference refvm.json
 ```
 
 ## 1. pytest-benchmark 当前结果
@@ -28,60 +28,60 @@ uv run --frozen python benchmarks/report.py --benchmark benchmark.json --referen
 
 | 基准 | 中位数 |
 |---|---:|
-| arithmetic | 0.046 ms |
-| variable lookup | 0.055 ms |
-| function call | 0.037 ms |
-| attribute | 0.059 ms |
-| index | 0.022 ms |
+| arithmetic | 0.048 ms |
+| variable lookup | 0.056 ms |
+| function call | 0.038 ms |
+| attribute | 0.060 ms |
+| index | 0.024 ms |
 | dict | 0.025 ms |
 | closure | 0.057 ms |
-| class instantiation | 0.066 ms |
+| class instantiation | 0.067 ms |
 
 ### 宏基准
 
 | 基准 | 中位数 |
 |---|---:|
-| recursion fib(10) | 53.43 ms |
-| recursion fib(20) | 1110.6 ms |
-| fibonacci (fib 10) | 13.36 ms |
-| loop (1000) | 19.17 ms |
-| method dispatch (1000) | 49.83 ms |
+| recursion fib(10) | 54.22 ms |
+| recursion fib(20) | 1152.8 ms |
+| fibonacci (fib 10) | 12.19 ms |
+| loop (1000) | 17.58 ms |
+| method dispatch (1000) | 45.59 ms |
 
 ### 标准库与宿主边界
 
 | 基准 | 中位数 |
 |---|---:|
-| map | 24.56 ms |
-| filter | 33.72 ms |
-| sorted | 2.96 ms |
-| zip + enumerate | 5.83 ms |
-| string join | 21.07 ms |
-| host list equality projection | 2.42 ms |
-| host `len` without projection | 1.32 ms |
+| map | 22.56 ms |
+| filter | 31.00 ms |
+| sorted | 2.74 ms |
+| zip + enumerate | 5.50 ms |
+| string join | 19.82 ms |
+| host list equality projection | 2.29 ms |
+| host `len` without projection | 1.30 ms |
 
 ### 迭代器
 
 | 基准 | 中位数 |
 |---|---:|
-| builtin loop | 19.29 ms |
-| user closure | 70.68 ms |
-| infinite + break | 45.59 ms |
+| builtin loop | 18.26 ms |
+| user closure | 65.89 ms |
+| infinite + break | 41.43 ms |
 
 ### 扩展方法/运算符
 
 | 基准 | 中位数 |
 |---|---:|
-| member call | 75.50 ms |
-| method call | 81.61 ms |
-| operator call | 85.36 ms |
+| member call | 74.70 ms |
+| method call | 79.40 ms |
+| operator call | 83.11 ms |
 
 ### 启动与编译
 
 | 基准 | 中位数 |
 |---|---:|
-| compiler construction | 0.551 ms |
-| empty program | 1.42 ms |
-| runtime construction | 0.150 ms |
+| compiler construction | 0.528 ms |
+| empty program | 1.37 ms |
+| runtime construction | 0.142 ms |
 
 ### 内存上限
 
@@ -94,8 +94,8 @@ uv run --frozen python benchmarks/report.py --benchmark benchmark.json --referen
 
 | 基准 | 树遍历解释器 | 字节码 VM | 加速 |
 |---|---:|---:|---:|
-| fib(15) | 112.5 ms | 39.11 ms | **2.88×** |
-| loop 10000 | 195.5 ms | 99.95 ms | **1.96×** |
+| fib(15) | 103.1 ms | 35.86 ms | **2.88×** |
+| loop 10000 | 187.8 ms | 92.26 ms | **2.04×** |
 
 完整子集进入 VM 后的当前结论见下方历史表；目标与预算见
 `docs/design/08-performance-benchmarking.md`。
@@ -106,13 +106,14 @@ uv run --frozen python benchmarks/report.py --benchmark benchmark.json --referen
 
 | 运行时 | fib(20) | loop 20000 | methods 5000 | 启动 |
 |---|---:|---:|---:|---:|
-| Oort 树遍历 0.3.1 | 1083.4 ms | 363.9 ms | 229.7 ms | 476.9 ms |
-| Python 3.12.12 | 1.30 ms | 1.31 ms | 0.570 ms | 40.66 ms |
-| Node 24.15.0 | 0.065 ms | 0.006 ms | 0.002 ms | 47.12 ms |
-| Ruby 4.0.10 | 0.556 ms | 0.328 ms | 0.267 ms | 143.1 ms |
-| Lua 5.4.8 | 0.375 ms | 0.074 ms | 0.157 ms | 7.35 ms |
+| Oort 树遍历 0.3.1 | 1077.1 ms | 370.4 ms | 235.4 ms | 460.7 ms |
+| Oort VM 0.3.1 | 415.5 ms | 134.1 ms | 155.1 ms | 505.9 ms |
+| Python 3.12.12 | 1.30 ms | 1.31 ms | 0.574 ms | 42.01 ms |
+| Node 24.15.0 | 0.064 ms | 0.006 ms | 0.002 ms | 45.72 ms |
+| Ruby 4.0.10 | 0.548 ms | 0.329 ms | 0.262 ms | 141.7 ms |
+| Lua 5.4.8 | 0.373 ms | 0.075 ms | 0.162 ms | 6.50 ms |
 
-当前 Oort 约为 CPython 的 **278–834 倍**耗时。Node 的优化 JIT 可能折叠简单循环/字段更新，其数字只作下限；Ruby/Lua 作语境参考。
+当前 Oort（解释器及 VM）约为 CPython 的 **102–832 倍**耗时。Node 的优化 JIT 可能折叠简单循环/字段更新，其数字只作下限；Ruby/Lua 作语境参考。
 
 详细运行方式与 Node/JIT、Ruby/Lua 的 caveat 见
 [reference/README.md](reference/README.md)。
