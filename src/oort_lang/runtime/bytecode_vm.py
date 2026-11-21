@@ -27,6 +27,7 @@ from .objects import (
     OortList,
     OortObject,
     OortSet,
+    OortSlice,
     OortTuple,
 )
 
@@ -158,6 +159,13 @@ class BytecodeVM:
                 for index in range(c):
                     mapping[registers[b + 2 * index]] = registers[b + 2 * index + 1]
                 registers[a] = OortDict(mapping)
+                pc += 1
+            elif op is Op.BUILD_SLICE:
+                registers[a] = OortSlice(
+                    registers[b] if c & 1 else None,
+                    registers[b + 1] if c & 2 else None,
+                    registers[b + 2] if c & 4 else None,
+                )
                 pc += 1
             elif op is Op.GET_ITEM:
                 try:

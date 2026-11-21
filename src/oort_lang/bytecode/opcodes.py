@@ -66,6 +66,7 @@ class Op(IntEnum):
     NEW_DICT = 53
     GET_ITEM = 54
     SET_ITEM = 55
+    BUILD_SLICE = 56
 
     EXTEND = 47
 
@@ -117,6 +118,7 @@ OP_FORMAT: dict[Op, str] = {
     Op.NEW_DICT: _FORMAT_ABC,
     Op.GET_ITEM: _FORMAT_ABC,
     Op.SET_ITEM: _FORMAT_ABC,
+    Op.BUILD_SLICE: _FORMAT_ABC,
     Op.EXTEND: _FORMAT_AX,
 }
 

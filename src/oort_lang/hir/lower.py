@@ -19,6 +19,7 @@ from .nodes import (
     BuildDict,
     BuildList,
     BuildSet,
+    BuildSlice,
     BuildTuple,
     Call,
     DefineFunction,
@@ -311,7 +312,12 @@ class HirLowerer:
             self._emit(GetItem(node.position, dst, container, index))
             return dst
         if isinstance(node, nodes.SliceLiteral):
-            self._reject(node, "slices")
+            start = None if node.start is None else self._require_value(node.start)
+            stop = None if node.stop is None else self._require_value(node.stop)
+            step = None if node.step is None else self._require_value(node.step)
+            dst = self._alloc(node.position)
+            self._emit(BuildSlice(node.position, dst, start, stop, step))
+            return dst
         self._reject(node, type(node).__name__)
 
     def _lower_sequence(self, elements, instruction, position) -> int:

@@ -7,6 +7,7 @@ from .nodes import (
     BuildDict,
     BuildList,
     BuildSet,
+    BuildSlice,
     BuildTuple,
     Call,
     DefineFunction,
@@ -65,6 +66,11 @@ def format_instruction(instruction: Instruction) -> str:
     if isinstance(instruction, BuildDict):
         values = ", ".join(f"R{key}:R{value}" for key, value in instruction.items)
         return f"BUILD_DICT R{instruction.dst} ({values})"
+    if isinstance(instruction, BuildSlice):
+        return (
+            f"BUILD_SLICE R{instruction.dst} "
+            f"({instruction.start}, {instruction.stop}, {instruction.step})"
+        )
     if isinstance(instruction, GetItem):
         return f"GET_ITEM R{instruction.dst} R{instruction.container}[R{instruction.index}]"
     if isinstance(instruction, SetItem):

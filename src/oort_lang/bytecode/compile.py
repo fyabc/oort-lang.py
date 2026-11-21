@@ -10,6 +10,7 @@ from ..hir.nodes import (
     BuildDict,
     BuildList,
     BuildSet,
+    BuildSlice,
     BuildTuple,
     Call,
     DefineFunction,
@@ -115,10 +116,12 @@ class _ProtoCompiler:
             isinstance(instruction, (BuildList, BuildTuple, BuildSet, BuildDict))
             for instruction in function.code
         )
+        has_slice = any(isinstance(instruction, BuildSlice) for instruction in function.code)
         self.scratch = max(
             self.max_args + 1,
             1 if self.has_iterator else 0,
             1 if has_build else 0,
+            3 if has_slice else 0,
             build_elements,
             build_dict_slots,
         )
@@ -232,6 +235,23 @@ class _ProtoCompiler:
                 values,
                 position,
                 count=len(instruction.items),
+            )
+            return
+        if isinstance(instruction, BuildSlice):
+            base = self.scratch_base
+            flags = 0
+            for index, register in enumerate(
+                (instruction.start, instruction.stop, instruction.step)
+            ):
+                if register is not None:
+                    self._word(
+                        encode_abc(Op.MOVE, base + index, register, 0),
+                        position,
+                    )
+                    flags |= 1 << index
+            self._word(
+                encode_abc(Op.BUILD_SLICE, instruction.dst, base, flags),
+                position,
             )
             return
         if isinstance(instruction, GetItem):

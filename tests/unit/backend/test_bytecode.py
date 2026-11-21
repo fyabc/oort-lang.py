@@ -99,7 +99,7 @@ def test_collections_compile_to_build_and_item_opcodes():
     module = compile_source(
         """var xs = [1, 2]
 xs[0] = 3
-print(xs[1], {: "a": 1 :}["a"])
+print(xs[1], {: "a": 1 :}["a"], xs[0:1])
 """
     )
     ops = {decode(word).op for word in module.main.code}
@@ -107,11 +107,13 @@ print(xs[1], {: "a": 1 :}["a"])
     assert Op.NEW_DICT in ops
     assert Op.GET_ITEM in ops
     assert Op.SET_ITEM in ops
+    assert Op.BUILD_SLICE in ops
     text = disassemble_module(module)
     assert "NEW_LIST" in text
     assert "NEW_DICT" in text
     assert "GET_ITEM" in text
     assert "SET_ITEM" in text
+    assert "BUILD_SLICE" in text
 
 
 def test_disassembly_mentions_protos_and_calls():

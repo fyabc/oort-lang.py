@@ -77,6 +77,8 @@ def _format(proto: Proto, pc: int, decoded: Decoded) -> str:
         return f"GET_ITEM R{decoded.a} R{decoded.b}[R{decoded.c}]"
     if op is Op.SET_ITEM:
         return f"SET_ITEM R{decoded.a}[R{decoded.b}] = R{decoded.c}"
+    if op is Op.BUILD_SLICE:
+        return f"BUILD_SLICE R{decoded.a} base=R{decoded.b} flags={decoded.c:03b}"
     return f"{op.name} A={decoded.a} B={decoded.b} C={decoded.c}"
 
 
