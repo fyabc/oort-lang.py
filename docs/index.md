@@ -16,7 +16,7 @@ Oort 以“显式优于隐式、正交优于特例、先语义后性能”为准
 
 - [开始使用](getting-started.md) — 安装 Oort 并运行第一个程序
 - [示例代码](examples.md) — 通过示例学习 Oort 语法
-- [VSCode 插件](https://github.com/fyabc/oort-lang.py/tree/main/editors/vscode) —
+- [VSCode 插件](https://github.com/fyabc/oort-lang/tree/main/editors/vscode) —
   `.ort` 语法高亮与本地安装
 
 ## 语言规范
@@ -67,9 +67,9 @@ Oort 的语言变更采用类 PEP/RFC 流程：
 
 ## 开发
 
-- [测试指南](https://github.com/fyabc/oort-lang.py/blob/main/tests/README.md) —
+- [测试指南](https://github.com/fyabc/oort-lang/blob/main/tests/README.md) —
   单元测试与集成测试的使用方式
-- [基准测试](https://github.com/fyabc/oort-lang.py/blob/main/benchmarks/README.md) —
+- [基准测试](https://github.com/fyabc/oort-lang/blob/main/benchmarks/README.md) —
   运行方式、统计规则与 profiling
-- [基准结果](https://github.com/fyabc/oort-lang.py/blob/main/benchmarks/RESULTS.md) —
+- [基准结果](https://github.com/fyabc/oort-lang/blob/main/benchmarks/RESULTS.md) —
   当前基线、VM/解释器对比与跨语言参考

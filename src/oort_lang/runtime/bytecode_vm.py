@@ -26,7 +26,6 @@ from ..bytecode.opcodes import (
     UNARY_OPCODES,
     Op,
 )
-from ..diagnostics import OortException
 from ..diagnostics.runtime_errors import (
     OortImportError,
     OortNameError,
@@ -583,6 +582,39 @@ class BytecodeVM:
                             env,
                         ),
                     )
+                for method_name, method_index in spec.class_methods:
+                    if not 0 <= method_index < len(module.functions):
+                        raise OortTypeError(
+                            f"Invalid bytecode class method index {method_index}.",
+                            position,
+                        )
+                    cls.set_class_field(
+                        method_name,
+                        OortVMClosure(
+                            self,
+                            module,
+                            module.functions[method_index],
+                            frame,
+                            env,
+                        ),
+                    )
+                for symbol, operand_count, method_index in spec.operators:
+                    if not 0 <= method_index < len(module.functions):
+                        raise OortTypeError(
+                            f"Invalid bytecode operator index {method_index}.",
+                            position,
+                        )
+                    cls.set_operator(
+                        symbol,
+                        operand_count,
+                        OortVMClosure(
+                            self,
+                            module,
+                            module.functions[method_index],
+                            frame,
+                            env,
+                        ),
+                    )
                 for slot_name, mutable, initializer_index in spec.slots:
                     initializer_closure = None
                     if initializer_index is not None:
@@ -669,20 +701,19 @@ class BytecodeVM:
                 self.interpreter.set_attribute(registers[a], name, registers[a + 1], position)
                 pc += 1
             elif op is Op.GET_ITEM:
-                try:
-                    registers[a] = registers[b][registers[c]]
-                except OortException:
-                    raise
-                except Exception as exc:
-                    raise OortRuntimeError(str(exc), position) from exc
+                registers[a] = self.interpreter.get_item(
+                    registers[b],
+                    registers[c],
+                    position,
+                )
                 pc += 1
             elif op is Op.SET_ITEM:
-                try:
-                    registers[a][registers[b]] = registers[c]
-                except OortException:
-                    raise
-                except Exception as exc:
-                    raise OortRuntimeError(str(exc), position) from exc
+                self.interpreter.set_item(
+                    registers[a],
+                    registers[b],
+                    registers[c],
+                    position,
+                )
                 pc += 1
             elif op is Op.CALL:
                 callee = registers[a]

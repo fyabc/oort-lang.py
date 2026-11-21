@@ -59,14 +59,22 @@ def format_instruction(instruction: Instruction) -> str:
         return f"MAKE_CLOSURE R{instruction.dst} proto[{instruction.function_index}]"
     if isinstance(instruction, BuildClass):
         methods = ", ".join(f"{name}=proto[{index}]" for name, index in instruction.methods)
+        class_methods = ", ".join(
+            f"class.{name}=proto[{index}]" for name, index in instruction.class_methods
+        )
+        operators = ", ".join(
+            f"operator {symbol!r}/{operand_count}=proto[{index}]"
+            for symbol, operand_count, index in instruction.operators
+        )
         bases = ", ".join(f"R{base}" for base in instruction.bases)
         slots = ", ".join(
             f"{name}{'=' + f'proto[{index}]' if index is not None else ''}"
             for name, _, index in instruction.slots
         )
+        method_text = " ".join(part for part in (methods, class_methods, operators) if part)
         return (
             f"BUILD_CLASS R{instruction.dst} {instruction.name} bases=({bases}) "
-            f"{methods} slots=({slots})"
+            f"{method_text} slots=({slots})"
         )
     if isinstance(instruction, BuildEnum):
         ctors = ", ".join(f"{name}/{arity}" for name, arity in instruction.constructors)

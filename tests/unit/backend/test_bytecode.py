@@ -172,6 +172,38 @@ print(C(1).n)
     assert "C bases=0" in text
 
 
+def test_class_methods_compile_to_class_spec():
+    module = compile_source(
+        """class C {
+    def __init__(n) { this.n = n }
+    def get() { this.n }
+    def class.make(n) { this(n) }
+}
+print(C.make(1).get())
+"""
+    )
+    spec = next(value for value in module.main.constants if isinstance(value, ClassSpec))
+    assert [name for name, _ in spec.methods] == ["__init__", "get"]
+    assert [name for name, _ in spec.class_methods] == ["make"]
+    text = disassemble_module(module)
+    assert "class.make=proto[" in text
+
+
+def test_class_operators_compile_to_class_spec():
+    module = compile_source(
+        """class Num {
+    def __init__(value) { this.value = value }
+    def operator "+"(other) { Num(this.value + other.value) }
+}
+print((Num(1) + Num(2)).value)
+"""
+    )
+    spec = next(value for value in module.main.constants if isinstance(value, ClassSpec))
+    assert [(symbol, count) for symbol, count, _ in spec.operators] == [("+", 2)]
+    text = disassemble_module(module)
+    assert "operator '+'" in text
+
+
 def test_core_class_slots_compile_to_class_spec():
     module = compile_source(
         """#lang oort-core

@@ -303,6 +303,48 @@ class Countdown {
 }
 for x in Countdown(3) { print(x) }
 """,
+    """\
+class Box {
+    def __init__(value) { this.value = value }
+    def get() { this.value }
+    def class.make(value) { this(value) }
+    def class.kind() { "box" }
+}
+class Special < Box {}
+print(Box.make(3).get(), Box.kind())
+print(Special.make(4).get(), Special.kind())
+""",
+    """\
+class Num {
+    def __init__(value) { this.value = value }
+    def operator "+"(other) { Num(this.value + other.value) }
+    def operator "-" { Num(0 - this.value) }
+}
+print((Num(2) + Num(3)).value, (-Num(4)).value)
+
+class Bag {
+    def __init__() { this.items = {: "a": 1 :} }
+    def operator "[]"(key) { this.items[key] }
+    def operator "[]="(key, value) { this.items[key] = value }
+}
+val bag = Bag()
+bag["b"] = 2
+print(bag["a"], bag["b"])
+bag["a"] += 10
+print(bag["a"])
+""",
+    """\
+var x = 1
+x += 2
+val xs = [1]
+xs[0] *= 3
+class C {
+    def __init__() { this.n = 1 }
+}
+val c = C()
+c.n += 4
+print(x, xs, c.n)
+""",
 ]
 
 
@@ -583,5 +625,5 @@ def test_vm_reports_class_errors(caplog: pytest.LogCaptureFixture):
 def test_vm_rejects_unsupported_constructs(caplog: pytest.LogCaptureFixture):
     compiler = get_compiler(["NOT_EXIST", "-t", "vm"])
     with pytest.raises(CompilerError):
-        compiler.run_string("var x = 1\nx += 1\n")
-    assert "HIR backend does not support augmented assignment" in caplog.text
+        compiler.run_string("...\n")
+    assert "HIR backend does not support ellipsis" in caplog.text

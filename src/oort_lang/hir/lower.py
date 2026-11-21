@@ -63,6 +63,21 @@ from .nodes import (
 
 _MAX_REGISTERS = 256
 
+_AUGMENTED_OPS = {
+    "+=": "+",
+    "-=": "-",
+    "*=": "*",
+    "/=": "/",
+    "//=": "//",
+    "%=": "%",
+    "**=": "**",
+    "<<=": "<<",
+    ">>=": ">>",
+    "&=": "&",
+    "^=": "^",
+    "|=": "|",
+}
+
 _PARAM_KINDS = {
     nodes.ParameterKind.POS_ONLY: ParamKind.POS_ONLY,
     nodes.ParameterKind.DEFAULT: ParamKind.POS_OR_KW,
@@ -110,6 +125,8 @@ class HirLowerer:
         statements = list(module.body.statements)
         function_defs: dict[int, int] = {}
         class_methods: dict[int, tuple[tuple[nodes.FunctionDef, int], ...]] = {}
+        class_level_methods: dict[int, tuple[tuple[nodes.FunctionDef, int], ...]] = {}
+        class_operators: dict[int, tuple[tuple[nodes.FunctionDef, int], ...]] = {}
         class_slots: dict[int, tuple[tuple[nodes.VarDecl, int | None], ...]] = {}
         for stmt in statements:
             if isinstance(stmt, nodes.FunctionDef) and not stmt.is_lambda:
@@ -117,6 +134,8 @@ class HirLowerer:
                 function_defs[id(stmt)] = self._reserve_function_index()
             elif isinstance(stmt, nodes.ClassDef):
                 methods: list[tuple[nodes.FunctionDef, int]] = []
+                level_methods: list[tuple[nodes.FunctionDef, int]] = []
+                operators: list[tuple[nodes.FunctionDef, int]] = []
                 slots: list[tuple[nodes.VarDecl, int | None]] = []
                 self._validate_top_level_class(stmt)
                 for member in stmt.body.statements:
@@ -133,16 +152,35 @@ class HirLowerer:
                             "class-body statements other than methods or slots",
                         )
                     self._validate_class_method(member)
-                    methods.append((member, self._reserve_function_index()))
+                    entry = (member, self._reserve_function_index())
+                    if member.is_operator:
+                        operators.append(entry)
+                    elif member.is_class_method:
+                        level_methods.append(entry)
+                    else:
+                        methods.append(entry)
                 class_methods[id(stmt)] = tuple(methods)
+                class_level_methods[id(stmt)] = tuple(level_methods)
+                class_operators[id(stmt)] = tuple(operators)
                 class_slots[id(stmt)] = tuple(slots)
 
-        main = self._lower_main(statements, function_defs, class_methods, class_slots)
+        main = self._lower_main(
+            statements,
+            function_defs,
+            class_methods,
+            class_level_methods,
+            class_operators,
+            class_slots,
+        )
         for stmt in statements:
             if isinstance(stmt, nodes.FunctionDef) and not stmt.is_lambda:
                 self._lower_function(stmt, function_defs[id(stmt)])
             elif isinstance(stmt, nodes.ClassDef):
-                for method, index in class_methods[id(stmt)]:
+                for method, index in (
+                    *class_methods[id(stmt)],
+                    *class_level_methods[id(stmt)],
+                    *class_operators[id(stmt)],
+                ):
                     self._lower_method(method, index)
                 for slot, slot_index in class_slots[id(stmt)]:
                     if slot_index is not None:
@@ -191,17 +229,17 @@ class HirLowerer:
             self._reject(node, "metaclasses")
 
     def _validate_class_method(self, node: nodes.FunctionDef) -> None:
-        if node.is_class_method:
-            self._reject(node, "class methods")
         if node.is_extension:
             self._reject(node, "extension methods in class bodies")
-        if len(node.names) != 1:
+        if not node.is_class_method and len(node.names) != 1:
             self._reject(node, "namespaced methods")
         if node.type_params:
             self._reject(node, "generic methods")
-        if node.operator_symbol is not None:
-            self._reject(node, "operator methods")
-        if _is_reserved_method_name(node.name) and node.name not in ("__init__", "__iter__"):
+        if node.is_class_method and node.operator_symbol is not None:
+            self._reject(node, "class operator methods")
+        if _is_reserved_method_name(node.name) and (
+            node.is_class_method or node.name not in ("__init__", "__iter__")
+        ):
             self._reject(node, f"special method {node.name!r}")
 
     def _validate_top_level_function(self, node: nodes.FunctionDef) -> None:
@@ -221,6 +259,8 @@ class HirLowerer:
         statements: list[nodes.ASTNode],
         function_defs: dict[int, int],
         class_methods: dict[int, tuple[tuple[nodes.FunctionDef, int], ...]],
+        class_level_methods: dict[int, tuple[tuple[nodes.FunctionDef, int], ...]],
+        class_operators: dict[int, tuple[tuple[nodes.FunctionDef, int], ...]],
         class_slots: dict[int, tuple[tuple[nodes.VarDecl, int | None], ...]],
     ) -> HirFunction:
         state = _FunctionState(name="<main>", code=[], scopes=[{}], is_main=True)
@@ -245,6 +285,8 @@ class HirLowerer:
                     self._lower_class_def(
                         stmt,
                         class_methods[id(stmt)],
+                        class_level_methods[id(stmt)],
+                        class_operators[id(stmt)],
                         class_slots[id(stmt)],
                     )
                     last = None
@@ -325,6 +367,8 @@ class HirLowerer:
         self,
         node: nodes.ClassDef,
         methods: tuple[tuple[nodes.FunctionDef, int], ...],
+        class_level_methods: tuple[tuple[nodes.FunctionDef, int], ...],
+        operators: tuple[tuple[nodes.FunctionDef, int], ...],
         slots: tuple[tuple[nodes.VarDecl, int | None], ...],
     ) -> None:
         bases = tuple(self._require_value(base) for base in node.bases)
@@ -332,6 +376,12 @@ class HirLowerer:
         slot_specs = [
             (slot.decl_targets[0].name, slot.mutable, initializer) for slot, initializer in slots
         ]
+        operator_specs: list[tuple[str, int, int]] = []
+        for method, index in operators:
+            symbol = method.operator_symbol
+            operand_count = method.operator_operand_count
+            assert symbol is not None and operand_count is not None
+            operator_specs.append((symbol, operand_count, index))
         self._emit(
             BuildClass(
                 node.position,
@@ -340,6 +390,8 @@ class HirLowerer:
                 bases,
                 tuple((method.name, index) for method, index in methods),
                 tuple(slot_specs),
+                tuple((method.name, index) for method, index in class_level_methods),
+                tuple(operator_specs),
             )
         )
         self._emit(StoreGlobal(node.name_position, node.name, dst))
@@ -640,7 +692,7 @@ class HirLowerer:
 
     def _lower_assignment(self, node: nodes.Assignment) -> int | None:
         if node.op.text != "=":
-            self._reject(node, "augmented assignment")
+            return self._lower_augmented_assignment(node)
         if isinstance(node.lhs, nodes.Attribute):
             receiver = self._require_value(node.lhs.value)
             rhs_value = self._require_value(node.rhs)
@@ -657,27 +709,68 @@ class HirLowerer:
         value = self._lower_expr(node.rhs)
         if value is None:
             value = self._const(None, node.position)
-        binding = node.lhs.binding
-        if binding is None or binding.is_global:
-            if not self._global_mutability.get(node.lhs.id, True):
-                self._reject(node.lhs, "assignment to an immutable global")
-            self._emit(StoreGlobal(node.lhs.position, node.lhs.id, value))
+        self._store_name(node.lhs, value)
+        return None
+
+    def _lower_augmented_assignment(self, node: nodes.Assignment) -> int | None:
+        base_op = _AUGMENTED_OPS.get(node.op.text)
+        if base_op is None:
+            self._reject(node, f"assignment operator {node.op.text!r}")
+
+        if isinstance(node.lhs, nodes.Attribute):
+            receiver = self._require_value(node.lhs.value)
+            current = self._alloc(node.lhs.position)
+            self._emit(GetAttr(node.lhs.position, current, receiver, node.lhs.attribute))
+            rhs_value = self._require_value(node.rhs)
+            result = self._alloc(node.position)
+            self._emit(BinOp(node.position, result, base_op, current, rhs_value))
+            target = self._require_value(node.lhs.value)
+            self._emit(SetAttr(node.lhs.position, target, node.lhs.attribute, result))
             return None
-        local = self._find_local(node.lhs.id)
+
+        if isinstance(node.lhs, nodes.Subscript):
+            container = self._require_value(node.lhs.value)
+            index = self._require_value(node.lhs.index)
+            current = self._alloc(node.lhs.position)
+            self._emit(GetItem(node.lhs.position, current, container, index))
+            rhs_value = self._require_value(node.rhs)
+            result = self._alloc(node.position)
+            self._emit(BinOp(node.position, result, base_op, current, rhs_value))
+            target = self._require_value(node.lhs.value)
+            target_index = self._require_value(node.lhs.index)
+            self._emit(SetItem(node.lhs.position, target, target_index, result))
+            return None
+
+        if not isinstance(node.lhs, nodes.Name):
+            self._reject(node, "augmented assignment target")
+        current = self._lower_name(node.lhs)
+        rhs_value = self._require_value(node.rhs)
+        result = self._alloc(node.position)
+        self._emit(BinOp(node.position, result, base_op, current, rhs_value))
+        self._store_name(node.lhs, result)
+        return None
+
+    def _store_name(self, target: nodes.Name, value: int) -> None:
+        binding = target.binding
+        if binding is None or binding.is_global:
+            if not self._global_mutability.get(target.id, True):
+                self._reject(target, "assignment to an immutable global")
+            self._emit(StoreGlobal(target.position, target.id, value))
+            return
+        local = self._find_local(target.id)
         if local is not None:
             if not local.mutable:
-                self._reject(node.lhs, "assignment to an immutable local")
-            self._emit(StoreLocal(node.lhs.position, local.slot, value))
-            return None
-        outer = self._find_outer(node.lhs.id)
+                self._reject(target, "assignment to an immutable local")
+            self._emit(StoreLocal(target.position, local.slot, value))
+            return
+        outer = self._find_outer(target.id)
         if outer is None:
-            self._reject(node.lhs, "closure over an unknown local")
+            self._reject(target, "closure over an unknown local")
         owner_index, outer_binding = outer
         if not outer_binding.mutable:
-            self._reject(node.lhs, "assignment to an immutable outer local")
+            self._reject(target, "assignment to an immutable outer local")
         depth = len(self._states) - 1 - owner_index
-        self._emit(StoreOuter(node.lhs.position, depth, outer_binding.slot, value))
-        return None
+        self._emit(StoreOuter(target.position, depth, outer_binding.slot, value))
 
     def _lower_expr(self, node: nodes.ASTNode | None) -> int | None:
         if node is None:

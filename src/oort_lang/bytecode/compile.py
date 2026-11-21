@@ -257,6 +257,8 @@ class _ProtoCompiler:
                 base_count=len(instruction.bases),
                 methods=instruction.methods,
                 slots=instruction.slots,
+                class_methods=instruction.class_methods,
+                operators=instruction.operators,
             )
             bx = self._constant(spec, position)
             self._word(encode_abx(Op.BUILD_CLASS, instruction.dst, bx), position)

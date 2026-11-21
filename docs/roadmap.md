@@ -95,10 +95,10 @@ P1 已完成。后续打磨（P2）：
 已落地（线性寄存器指令、动态子集 lowering、集合/下标/切片/属性、`-t bc`/`-t vm`、
 寄存器 VM、lambda/闭包、一等函数值、动态/静态类、模块导入、core 的
 ADT/match 与完整参数绑定）。`examples/08_core` 已全部在 VM 下运行，
-`examples/` 还有循环内创建闭包、类方法、扩展/运算符方法等待补；
+`examples/` 还有循环内创建闭包、元类/`super`、扩展方法与扩展运算符等待补；
 当前 VM 已覆盖主要宏基准，但 loop 仍接近 2× 目标、完整子集相对早期切片有
 回退；最新数字见
-[`benchmarks/RESULTS.md`](https://github.com/fyabc/oort-lang.py/blob/main/benchmarks/RESULTS.md)。
+[`benchmarks/RESULTS.md`](https://github.com/fyabc/oort-lang/blob/main/benchmarks/RESULTS.md)。
 接下来继续补子集、扩大差分/错误路径覆盖，再评估默认后端切换与优化。
 
 ### 阶段 4：`oort-systems` / `oort-meta` 与 DSL 开关（按需）
@@ -114,7 +114,7 @@ LLVM IR、静态模块单态化、GC/ARC 选择，以及关键路径的 Rust 重
 
 - **语言变更**：先写 `docs/proposals/`，再更新 `docs/spec/` 与测试。
 - **公开进度**：本文件保持高层阶段与目标；已完成项记录在
-  [CHANGELOG](https://github.com/fyabc/oort-lang.py/blob/main/CHANGELOG.md)。
+  [CHANGELOG](https://github.com/fyabc/oort-lang/blob/main/CHANGELOG.md)。
 - **任务级事项**：GitHub issues + milestones。
 - **日常决策与未合并工作**：维护在私有工作台账（不随仓库发布）。
 

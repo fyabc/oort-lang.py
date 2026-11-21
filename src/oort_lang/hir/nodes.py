@@ -85,6 +85,8 @@ class BuildClass(Instruction):
     bases: tuple[int, ...]
     methods: tuple[tuple[str, int], ...]
     slots: tuple[tuple[str, bool, int | None], ...] = ()
+    class_methods: tuple[tuple[str, int], ...] = ()
+    operators: tuple[tuple[str, int, int], ...] = ()
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

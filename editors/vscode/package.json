@@ -18,7 +18,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/fyabc/oort-lang.py",
+    "url": "https://github.com/fyabc/oort-lang",
     "directory": "editors/vscode"
   },
   "contributes": {

@@ -1,8 +1,8 @@
 site_name: Oort
 site_description: Oort 编程语言文档：规范、提案、设计与实现笔记
-site_url: https://fyabc.github.io/oort-lang.py/
-repo_url: https://github.com/fyabc/oort-lang.py
-repo_name: fyabc/oort-lang.py
+site_url: https://fyabc.github.io/oort-lang/
+repo_url: https://github.com/fyabc/oort-lang
+repo_name: fyabc/oort-lang
 edit_uri: edit/main/docs/
 docs_dir: docs
 site_dir: site

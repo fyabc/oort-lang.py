@@ -6,6 +6,7 @@ import pytest
 
 from oort_lang.diagnostics.syntax_errors import UnsupportedSyntax
 from oort_lang.hir import (
+    BinOp,
     BuildClass,
     BuildDict,
     BuildEnum,
@@ -26,6 +27,7 @@ from oort_lang.hir import (
     MakeClosure,
     Match,
     SetAttr,
+    SetItem,
     StoreGlobal,
     StoreLocal,
     StoreOuter,
@@ -115,6 +117,24 @@ print(total)
     assert labels
 
 
+def test_augmented_assignment_lowers_to_read_modify_write():
+    module = lower(
+        """var x = 1
+x += 2
+val xs = [1]
+xs[0] *= 3
+class C { def __init__() { this.n = 1 } }
+val c = C()
+c.n += 4
+print(x, xs, c.n)
+"""
+    )
+    ops = [instruction for instruction in module.main.code if isinstance(instruction, BinOp)]
+    assert [(instruction.op) for instruction in ops] == ["+", "*", "+"]
+    assert sum(isinstance(instruction, SetItem) for instruction in module.main.code) == 1
+    assert sum(isinstance(instruction, SetAttr) for instruction in module.main.code) == 1
+
+
 def test_collection_literals_and_subscripts_lower():
     module = lower(
         """var xs = [1, 2]
@@ -192,6 +212,40 @@ print(c.get())
     assert all(method.has_this for method in methods)
     assert methods[0].params == ("this", "n")
     assert methods[1].params == ("this",)
+
+
+def test_class_methods_lower_separately_from_instance_methods():
+    module = lower(
+        """class C {
+    def __init__(n) { this.n = n }
+    def get() { this.n }
+    def class.make(n) { this(n) }
+}
+print(C.make(1).get())
+"""
+    )
+    build = next(i for i in module.main.code if isinstance(i, BuildClass))
+    assert [name for name, _ in build.methods] == ["__init__", "get"]
+    assert [name for name, _ in build.class_methods] == ["make"]
+    make = module.functions[build.class_methods[0][1]]
+    assert make.has_this
+    assert make.params == ("this", "n")
+
+
+def test_classes_lower_operator_methods_separately():
+    module = lower(
+        """class Num {
+    def operator "+"(other) { this }
+    def operator "-" { this }
+}
+"""
+    )
+    build = next(i for i in module.main.code if isinstance(i, BuildClass))
+    assert [(symbol, count) for symbol, count, _ in build.operators] == [("+", 2), ("-", 1)]
+    plus = module.functions[build.operators[0][2]]
+    negate = module.functions[build.operators[1][2]]
+    assert plus.params == ("this", "other")
+    assert negate.params == ("this",)
 
 
 def test_class_bases_lower_to_registers():
@@ -417,7 +471,6 @@ print(true or false)
 @pytest.mark.parametrize(
     ("source", "detail"),
     [
-        ("var x = 1\nx += 1\n", "augmented assignment"),
         ("...\n", "ellipsis"),
         ("val d = {: **other :}\n", "dict unpacking"),
         ("val p = (1, 2)\na, b = p\n", "attribute/tuple assignment"),
@@ -433,7 +486,6 @@ def test_unsupported_nodes_are_rejected(source: str, detail: str):
     [
         ("class C { print(1) }\n", "class-body"),
         ("def f() { class C {} }\nf()\n", "nested class"),
-        ("class C { def class.f: 1 }\n", "class methods"),
         ("class C { def __str__: 1 }\n", "special method"),
         ("class A { def f: 1 }\nclass C < A { def f: super.f() }\n", "ImplicitSuperExpr"),
     ],

@@ -64,9 +64,9 @@ print(f(2))
 
 
 def test_bytecode_target_rejects_unsupported_syntax(monkeypatch, caplog):
-    source = "var x = 1\nx += 1\n"
+    source = "...\n"
     assert _run_cli(monkeypatch, ["-t", "bc", "-c", source]) != 0
-    assert "HIR backend does not support augmented assignment" in caplog.text
+    assert "HIR backend does not support ellipsis" in caplog.text
 
 
 def test_print_ast_with_metadata(monkeypatch, capsys):

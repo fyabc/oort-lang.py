@@ -503,20 +503,7 @@ class ASTInterpreter(ASTVisitor[OortObject]):
         elif isinstance(lhs, nodes.Subscript):
             value = lhs.value.accept(self)
             index = lhs.index.accept(self)
-            if isinstance(value, OortInstance) and not isinstance(value, OortType):
-                method = self._find_operator(value, "[]=", 3, lhs.position)
-                if method is None:
-                    raise OortTypeError(
-                        f"Type {value.type.name!r} does not support subscript "
-                        'assignment (define `operator "[]="`).',
-                        lhs.position,
-                    )
-                self._invoke_operator(method, [index, rhs], "[]=", lhs.position)
-                return
-            try:
-                value[index] = rhs
-            except Exception as e:
-                raise OortRuntimeError(f"{e}", lhs.position) from e
+            self.set_item(value, index, rhs, lhs.position)
         else:
             assert isinstance(lhs, nodes.Attribute)
             assert lhs.ctx == nodes.LValueContext.STORE
@@ -636,24 +623,56 @@ class ASTInterpreter(ASTVisitor[OortObject]):
             f"Ambiguous extension {kind} {label!r} for type {target!r}: candidates from {origins}."
         )
 
-    def visit_subscript(self, node: nodes.Subscript) -> OortObject:
-        value = node.value.accept(self)
-        index = node.index.accept(self)
-
+    def get_item(
+        self,
+        value: OortObject,
+        index: OortObject,
+        position: SourcePosition,
+    ) -> OortObject:
+        """Read `value[index]`, honouring user `operator "[]"` methods."""
         if isinstance(value, OortInstance) and not isinstance(value, OortType):
-            method = self._find_operator(value, "[]", 2, node.position)
+            method = self._find_operator(value, "[]", 2, position)
             if method is None:
                 raise OortTypeError(
                     f"Type {value.type.name!r} does not support subscripting "
                     '(define `operator "[]"`).',
-                    node.position,
+                    position,
                 )
-            return self._invoke_operator(method, [index], "[]", node.position)
+            return self._invoke_operator(method, [index], "[]", position)
 
         try:
             return value[index]
         except Exception as e:
-            raise OortRuntimeError(f"{e}", node.position) from e
+            raise OortRuntimeError(f"{e}", position) from e
+
+    def set_item(
+        self,
+        value: OortObject,
+        index: OortObject,
+        item: OortObject,
+        position: SourcePosition,
+    ) -> None:
+        """Write `value[index] = item`, honouring user `operator "[]="` methods."""
+        if isinstance(value, OortInstance) and not isinstance(value, OortType):
+            method = self._find_operator(value, "[]=", 3, position)
+            if method is None:
+                raise OortTypeError(
+                    f"Type {value.type.name!r} does not support subscript "
+                    'assignment (define `operator "[]="`).',
+                    position,
+                )
+            self._invoke_operator(method, [index, item], "[]=", position)
+            return
+
+        try:
+            value[index] = item
+        except Exception as e:
+            raise OortRuntimeError(f"{e}", position) from e
+
+    def visit_subscript(self, node: nodes.Subscript) -> OortObject:
+        value = node.value.accept(self)
+        index = node.index.accept(self)
+        return self.get_item(value, index, node.position)
 
     def visit_call(self, node: nodes.Call) -> OortObject:
         func = node.func.accept(self)

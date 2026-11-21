@@ -72,7 +72,7 @@
 回归跟踪由 `.github/workflows/benchmark.yml` 在 `main` 上写入历史，并在
 较基线回退 150% 时告警。运行方式、基线与 profiling 工具
 （py-spy / Scalene / Memray）见
-[`benchmarks/README.md`](https://github.com/fyabc/oort-lang.py/blob/main/benchmarks/README.md)。
+[`benchmarks/README.md`](https://github.com/fyabc/oort-lang/blob/main/benchmarks/README.md)。
 
 ### 扩展计划
 
@@ -107,7 +107,7 @@
 ### 6.1 当前结果
 
 当前树遍历基线、VM 对比、跨语言参考和内存上限统一记录在
-[`benchmarks/RESULTS.md`](https://github.com/fyabc/oort-lang.py/blob/main/benchmarks/RESULTS.md)。
+[`benchmarks/RESULTS.md`](https://github.com/fyabc/oort-lang/blob/main/benchmarks/RESULTS.md)。
 本文只保留测量方法、预算与结论，不复制整张结果表，避免多处数字漂移。
 
 **最近结论（详细数字见 RESULTS）**：
@@ -133,7 +133,7 @@
   CPython 参考倍数；否则不能称为“可用”。
 - 手动参考套件：`benchmarks/reference/`（内部计时、100ms 自适应重复、
   结果校验、启动单独测量）。运行说明与 caveat 见该目录 README；结果统一
-  记录在 [`benchmarks/RESULTS.md`](https://github.com/fyabc/oort-lang.py/blob/main/benchmarks/RESULTS.md)。
+  记录在 [`benchmarks/RESULTS.md`](https://github.com/fyabc/oort-lang/blob/main/benchmarks/RESULTS.md)。
 
 ### 6.4 更新流程
 

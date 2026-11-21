@@ -7,8 +7,8 @@ Oort 目前处于 0.x 阶段，推荐从源码安装。要求 Python 3.11+。
 ### 使用 uv（推荐）
 
 ```bash
-git clone https://github.com/fyabc/oort-lang.py.git
-cd oort-lang.py
+git clone https://github.com/fyabc/oort-lang.git
+cd oort-lang
 pip install uv
 uv sync
 ```
@@ -18,8 +18,8 @@ uv sync
 ### 使用 pip
 
 ```bash
-git clone https://github.com/fyabc/oort-lang.py.git
-cd oort-lang.py
+git clone https://github.com/fyabc/oort-lang.git
+cd oort-lang
 pip install .
 ```
 
@@ -68,7 +68,7 @@ Out[1]: 2
 
 仓库内置 VSCode 语法高亮插件（TextMate、文件图标，暂未上 Marketplace）：
 
-<https://github.com/fyabc/oort-lang.py/tree/main/editors/vscode>
+<https://github.com/fyabc/oort-lang/tree/main/editors/vscode>
 
 ## 下一步
 

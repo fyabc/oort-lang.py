@@ -50,9 +50,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/fyabc/oort-lang.py"
-Repository = "https://github.com/fyabc/oort-lang.py"
-Issues = "https://github.com/fyabc/oort-lang.py/issues"
+Homepage = "https://github.com/fyabc/oort-lang"
+Repository = "https://github.com/fyabc/oort-lang"
+Issues = "https://github.com/fyabc/oort-lang/issues"
 
 [project.scripts]
 oort = "oort_lang.driver.main:main"

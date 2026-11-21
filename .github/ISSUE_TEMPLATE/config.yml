@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Question / discussion
-    url: https://github.com/fyabc/oort-lang.py/discussions
+    url: https://github.com/fyabc/oort-lang/discussions
     about: Ask usage questions or discuss ideas before opening an issue.
   - name: Security report
-    url: https://github.com/fyabc/oort-lang.py/security/advisories/new
+    url: https://github.com/fyabc/oort-lang/security/advisories/new
     about: Report vulnerabilities privately (do not open a public issue).

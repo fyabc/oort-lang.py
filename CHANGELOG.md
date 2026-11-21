@@ -42,6 +42,11 @@
   之间共享同一个绑定器。嵌套的具名函数现在会降级为带自递归局部绑定的闭包，
   而会创建函数的循环仍被显式拒绝。`-t bc` 打印反汇编，`-t vm` 执行该子集；
   `-t eval` 仍是默认后端。
+- HIR/VM 动态类补充类方法与运算符方法：`def class.f` 写入元类并在类/子类上绑定，
+  `def operator "<sym>"` 注册到类型运算符表；下标读写改走共享的
+  `get_item`/`set_item`，因此用户 `"[]"`/`"[]="` 与 `on_missing` 在 VM 下生效。
+  增强赋值（名字、属性、下标目标）也降低为读-改-写；`examples/03_oop/03_03_protocols.ort`
+  现可在 VM 下运行。元类、`super`、扩展方法与扩展运算符仍显式拒绝。
 - `oort-object` 下标与缺失属性协议（OP 0018）：`def operator "[]"(index)` /
   `def operator "[]="(index, value)` 用于用户自定义索引（包括切片和元组索引），
   以及在字段、方法和扩展之后进行只读的 `on_missing(name)` 回退。内建容器保留
@@ -144,7 +149,7 @@
 - `examples/07_showcase/07_00_json.ort` 的 JSON 解析器/格式化器展示，包括
   `\uXXXX`/代理对处理和 CLI 文件参数。
 - 使用 MkDocs Material 构建并部署到 GitHub Pages 的文档站点：
-  <https://fyabc.github.io/oort-lang.py/>，新增了入门和示例页面。
+  <https://fyabc.github.io/oort-lang/>，新增了入门和示例页面。
 
 ### 变更
 

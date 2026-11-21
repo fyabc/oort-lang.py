@@ -45,8 +45,10 @@ HIR 是 AST 与字节码之间的**线性寄存器中间表示**：
 - 函数值/lambda（显式参数与匿名 `$0`/`$1`）、嵌套具名函数（含自递归）、
   闭包捕获外层局部变量；
 - 多变量 `for` 解包（Tuple/List 元素，运行期校验长度）；
-- 模块顶层动态类、实例方法、单/多继承与 `this`；`__init__` 构造与
-  `__iter__` 迭代协议方法；
+- 模块顶层动态类、实例方法、类方法、运算符方法、单/多继承与 `this`；
+  `__init__` 构造与 `__iter__` 迭代协议方法；
+- 增强赋值：先读左侧当前值，再计算并写回；支持名字、属性与下标目标，
+  下标/属性的接收者在读写两侧按解释器顺序求值；
 - 顶层 `import` / `from ... import ...`（含别名、相对路径与 `-I` 搜索路径）；
   导入模块同样以字节码执行，并拥有独立的模块全局环境；
 - `oort-core` 静态类与槽：`val`/`var` 槽、槽初始化表达式、构造前初始化、
@@ -61,8 +63,8 @@ HIR 是 AST 与字节码之间的**线性寄存器中间表示**：
 
 显式拒绝：
 
-- 扩展方法、运算符方法、泛型；
-- 类方法、元类、类体中方法/槽以外的语句、嵌套类与类表达式、`super`；
+- 扩展方法与扩展运算符、泛型；
+- 元类、类体中方法/槽以外的语句、嵌套类与类表达式、`super` 调用；
 - 调用侧 `*`/`**` 展开（`f(*xs)`/`f(**d)`）；匿名 lambda 的关键字实参；
 - 默认表达式引用类体成员（第一切片显式拒绝）；
 - `match` arm 内的 `return`（以及落到 arm 函数后会被当作“循环外”的
@@ -196,9 +198,11 @@ dump 用于调试。
 - 多变量 `for` 用 `UNPACK`（ABC：source、目标起始槽、变量数）；VM 校验元素为
   Tuple/List 且数量匹配，否则报与解释器相同的错误。
 - 类用 `BUILD_CLASS`（ABx：常量池中的 `ClassSpec`）。基类寄存器先 MOVE 到
-  scratch 区（`Proto.scratch_base`），`ClassSpec` 记录类名、基类数量、方法
-  `(name, proto)` 表与槽 `(name, mutable, initializer proto?)` 表；方法 proto
-  以 `has_this` 标记，参数表包含 `this`。
+  scratch 区（`Proto.scratch_base`），`ClassSpec` 记录类名、基类数量、实例方法
+  `(name, proto)` 表、类方法 `(name, proto)` 表、运算符
+  `(symbol, operand_count, proto)` 表与槽 `(name, mutable, initializer proto?)`
+  表；方法 proto 以 `has_this` 标记，参数表包含 `this`。类方法写入元类字段，
+  实例方法写入类字段；运算符方法写入 `OortType.operators`。
 - `Proto.signature` 保存 `SignatureSpec`：参数种类、槽、默认值 proto 索引与
   `has_this`。`CALL` 保持 `A=base, C=位置参数数`；`CALL_KW A Bx=K(CallSpec)`
   的 scratch 布局为 callee、位置值、关键字值、块值。反汇编显示
@@ -252,7 +256,7 @@ dump 用于调试。
 
 ## 9. 下一步
 
-1. 继续扩大 HIR/VM 子集：类方法、扩展/运算符方法、循环内创建闭包。
+1. 继续扩大 HIR/VM 子集：循环内创建闭包、元类/`super`、扩展方法与扩展运算符。
 2. 扩大差分/错误路径测试，覆盖更多动态示例与边界组合。
 3. 评估把 CLI 默认后端切到 VM（先做性能与兼容性基线）。
 4. 继续优化：寄存器复用、常量内联、当前帧内联、类型特化；用基准证明。

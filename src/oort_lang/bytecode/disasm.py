@@ -40,12 +40,26 @@ def _format(proto: Proto, pc: int, decoded: Decoded) -> str:
         spec = proto.constants[decoded.bx] if 0 <= decoded.bx < len(proto.constants) else None
         if isinstance(spec, ClassSpec):
             methods = ", ".join(f"{name}=proto[{index}]" for name, index in spec.methods)
+            class_methods = ", ".join(
+                f"class.{name}=proto[{index}]" for name, index in spec.class_methods
+            )
+            operators = ", ".join(
+                f"operator {symbol!r}/{operand_count}=proto[{index}]"
+                for symbol, operand_count, index in spec.operators
+            )
             slots = ", ".join(
                 f"{name}{'=' + f'proto[{index}]' if index is not None else ''}"
                 for name, _, index in spec.slots
             )
             details = " ".join(
-                part for part in (methods, f"slots=({slots})" if slots else "") if part
+                part
+                for part in (
+                    methods,
+                    class_methods,
+                    operators,
+                    f"slots=({slots})" if slots else "",
+                )
+                if part
             )
             return f"BUILD_CLASS R{decoded.a} {spec.name} bases={spec.base_count} {details}"
         return f"BUILD_CLASS R{decoded.a} <bad spec>"

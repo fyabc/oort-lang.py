@@ -70,15 +70,19 @@ Oort 需要一个寄存器式字节码 VM 作为动态方言的高性能后端�
 - **约束落实**：调用使用 scratch 区约定；`ITER_NEXT` 展开为两字；
   未支持 opcode/构造显式报错，不做默认穿透。
 - **基准**：当前机器、历史里程碑与跨语言参考统一记录在
-  [`benchmarks/RESULTS.md`](../../benchmarks/RESULTS.md)；早期第一切片与完整
+  [`benchmarks/RESULTS.md`](https://github.com/fyabc/oort-lang/blob/main/benchmarks/RESULTS.md)；早期第一切片与完整
   子集的对比也在该文件的历史表中。实现进展不复制具体数字。
 - **闭包与函数值**：lambda（显式参数与匿名 `$0`）降低为独立 proto；
   `MAKE_CLOSURE` 捕获定义帧，`LOAD_OUTER`/`STORE_OUTER` 读写外层局部。
   VM 闭包可赋值、返回、放入集合、经下标/嵌套调用，也可传给 `map` 等原生
   高阶助手。循环体内创建 lambda 仍显式拒绝（每迭代捕获语义未实现）。
-- **类与方法**：顶层动态类降低为 `BUILD_CLASS`；实例方法以 `this` 槽 0
-  降低并捕获定义帧，属性查找绑定为 `OortVMMethod`。支持单/多继承、`__init__`
-  与 `__iter__`；类方法、运算符方法、元类、类体槽、嵌套类与 `super` 仍拒绝。
+- **类与方法**：顶层动态类降低为 `BUILD_CLASS`；实例/类/运算符方法以
+  `this` 槽 0 降低并捕获定义帧，属性查找绑定为 `OortVMMethod`。支持单/多继承、
+  `__init__`、`__iter__`、类方法（写入元类）与运算符方法（写入类型运算符表）。
+  元类、类体槽、嵌套类与 `super` 仍拒绝。
+- **下标/属性与增强赋值**：VM 的 `GET_ITEM`/`SET_ITEM` 复用解释器
+  `get_item`/`set_item`，用户 `"[]"`/`"[]="` 与 `on_missing` 生效；
+  增强赋值降低为读-改-写（名字、属性、下标）。
 - **模块**：顶层 `import`/`from` 降低为 `IMPORT`；VM 复用现有 `ModuleLoader`
   的路径解析、缓存、循环检测、方言检查与原生模块，并把每个导入模块降低、
   编译到同一 VM 执行。每个模块有独立全局环境，闭包/类方法记住定义模块。

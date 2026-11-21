@@ -1,9 +1,9 @@
 # Oort Programming Language
 
-[![CI](https://github.com/fyabc/oort-lang.py/actions/workflows/ci.yml/badge.svg)](https://github.com/fyabc/oort-lang.py/actions/workflows/ci.yml)
+[![CI](https://github.com/fyabc/oort-lang/actions/workflows/ci.yml/badge.svg)](https://github.com/fyabc/oort-lang/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-文档站点：<https://fyabc.github.io/oort-lang.py/>（规范、提案、设计与示例）
+文档站点：<https://fyabc.github.io/oort-lang/>（规范、提案、设计与示例）
 
 ## 简介
 
