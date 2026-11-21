@@ -1,37 +1,37 @@
 ---
-name: Bug report
-about: Report incorrect behavior or a crash
+name: 缺陷报告
+about: 报告错误行为或崩溃
 title: ""
 labels: bug
 assignees: ""
 ---
 
-## What happened
+## 发生了什么
 
-<!-- A clear description of the wrong behavior. -->
+<!-- 清晰描述错误行为。 -->
 
-## Minimal reproducer
+## 最小复现
 
 ```oort
 # paste the smallest program that reproduces the problem
 ```
 
-## Command and output
+## 命令与输出
 
 ```text
 $ oort repro.ort
 # full diagnostic output
 ```
 
-## Expected behavior
+## 预期行为
 
-## Environment
+## 环境
 
-- Oort version (`oort --version`):
-- OS:
-- Python version:
-- Execution target (`-t ast | astm | eval`):
+- Oort 版本（`oort --version`）：
+- 操作系统：
+- Python 版本：
+- 执行目标（`-t ast | astm | eval`）：
 
-## Additional context
+## 附加信息
 
-<!-- Does this relate to a spec section or proposal? -->
+<!-- 这与某个规范章节或提案有关吗？ -->

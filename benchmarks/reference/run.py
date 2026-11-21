@@ -221,7 +221,13 @@ def main() -> int:
 
     if args.json:
         payload = {
+            "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "repeat": args.repeat,
+            "warmup": args.warmup,
+            "runtimes": list(bases),
+            "workloads": workload_names,
             "versions": versions,
+            "runtime_overrides": overrides,
             "startup_ms": {name: value * 1e3 for name, value in startup.items()},
             "exec_ms": {
                 name: {

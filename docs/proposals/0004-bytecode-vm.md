@@ -69,9 +69,9 @@ Oort 需要一个寄存器式字节码 VM 作为动态方言的高性能后端�
   解释器语义；字面量每次求值重新包装以保持 `is` 的身份语义。
 - **约束落实**：调用使用 scratch 区约定；`ITER_NEXT` 展开为两字；
   未支持 opcode/构造显式报错，不做默认穿透。
-- **基准**（本机中位数，`benchmarks/test_vm.py`）：fib(15) 解释器 102.45ms →
-  VM 18.74ms（5.47×）；loop 10000 178.35ms → 76.23ms（2.34×）。fib(20) 粗测
-  约 6.2×。
+- **基准**：当前机器、历史里程碑与跨语言参考统一记录在
+  [`benchmarks/RESULTS.md`](../../benchmarks/RESULTS.md)；早期第一切片与完整
+  子集的对比也在该文件的历史表中。实现进展不复制具体数字。
 - **闭包与函数值**：lambda（显式参数与匿名 `$0`）降低为独立 proto；
   `MAKE_CLOSURE` 捕获定义帧，`LOAD_OUTER`/`STORE_OUTER` 读写外层局部。
   VM 闭包可赋值、返回、放入集合、经下标/嵌套调用，也可传给 `map` 等原生
@@ -82,6 +82,9 @@ Oort 需要一个寄存器式字节码 VM 作为动态方言的高性能后端�
 - **模块**：顶层 `import`/`from` 降低为 `IMPORT`；VM 复用现有 `ModuleLoader`
   的路径解析、缓存、循环检测、方言检查与原生模块，并把每个导入模块降低、
   编译到同一 VM 执行。每个模块有独立全局环境，闭包/类方法记住定义模块。
+- **嵌套具名函数**：嵌套 `def` 降低为 `MAKE_CLOSURE` + `StoreLocal`，先声明
+  局部函数槽以支持自递归；默认参数与闭包规则复用参数绑定切片。循环内创建
+  仍显式拒绝。
 - **参数绑定**：`runtime/call_protocol.py` 共享绑定核心；HIR/`Proto` 携带
   `SignatureSpec`，默认值编译为 `<default ...>` proto（按闭包缓存），
   字节码新增 `CALL_KW`/`CallSpec`。关键字、位置/关键字限定、`*args`、

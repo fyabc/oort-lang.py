@@ -70,4 +70,6 @@ Oort 的语言变更采用类 PEP/RFC 流程：
 - [测试指南](https://github.com/fyabc/oort-lang.py/blob/main/tests/README.md) —
   单元测试与集成测试的使用方式
 - [基准测试](https://github.com/fyabc/oort-lang.py/blob/main/benchmarks/README.md) —
-  AST 解释器性能基线
+  运行方式、统计规则与 profiling
+- [基准结果](https://github.com/fyabc/oort-lang.py/blob/main/benchmarks/RESULTS.md) —
+  当前基线、VM/解释器对比与跨语言参考

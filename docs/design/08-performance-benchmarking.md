@@ -58,9 +58,12 @@
 |------|------|
 | `test_micro.py` | 算术、局部变量、函数调用、属性、下标、字典 |
 | `test_macro.py` | 递归、循环、方法分派 |
+| `test_stdlib.py` | map/filter/sorted/zip/enumerate、字符串 join、宿主投影与 `len` |
+| `test_iterators.py` | 内置循环、用户 `__iter__` 闭包、无限迭代器 + `break` |
 | `test_startup.py` | 编译器/运行时构造、空程序 |
 | `test_memory.py` | Runtime 与程序的峰值内存上限 |
 | `test_ast_interpreter.py` | 历史 Fibonacci 基线 |
+| `test_vm.py` | 同一 HIR 程序在解释器与字节码 VM 上的对比 |
 
 微/宏基准由 `bench_utils.compile_program` 先完成解析、语义分析和解释器
 构造，基准函数只测 `interpreter.run(ast)`；编译开销由启动/空程序基准单独
@@ -77,7 +80,7 @@
 - [x] 添加类实例化基准
 - [x] 添加属性查找基准
 - [x] 添加控制流基准 (循环、分支)
-- [ ] 添加可选的手动跨语言参考套件（Python/Node；Lua/Ruby 视环境）
+- [x] 添加可选的手动跨语言参考套件（Python/Node/Ruby/Lua）
 - [ ] 增加 CI 中的机器可读阈值（当前为历史告警）
 
 ### 手动参考套件规则
@@ -101,39 +104,23 @@
 
 ## 6. P4 性能预算（2026-11-21 基线）
 
-### 6.1 当前树遍历解释器基线
+### 6.1 当前结果
 
-Windows / Ryzen 7 5800H，`pytest benchmarks/`，中位数；程序已预先编译，
-只测 `interpreter.run(ast)`：
+当前树遍历基线、VM 对比、跨语言参考和内存上限统一记录在
+[`benchmarks/RESULTS.md`](https://github.com/fyabc/oort-lang.py/blob/main/benchmarks/RESULTS.md)。
+本文只保留测量方法、预算与结论，不复制整张结果表，避免多处数字漂移。
 
-| 基准 | 当前中位数 |
-|------|-----------|
-| micro arithmetic | 0.047 ms |
-| micro function call | 0.039 ms |
-| micro attribute | 0.058 ms |
-| micro index | 0.022 ms |
-| micro class instantiation | 0.065 ms |
-| macro loop (1000) | 17.37 ms |
-| macro method dispatch (1000) | 43.95 ms |
-| fib(10) | 12.37 ms |
-| fib(20) | 1017.44 ms |
-| 空程序（含运行入口） | 1.37 ms |
+**最近结论（详细数字见 RESULTS）**：
 
-同一算法的 CPython 3.12 参考（同机、同一进程内简单计时，仅作数量级校准）：
-
-| 算法 | CPython |
-|------|---------|
-| fib(20) | ~1.26 ms |
-| 循环 1000 | ~0.044 ms |
-| 方法分派 1000 | ~0.097 ms |
-
-当前树遍历解释器约为 CPython 的 **400–800 倍**耗时。
+- 树遍历解释器仍以预编译程序的 pytest-benchmark 中位数为基线；
+- VM fib 稳定超过 2× 目标，loop 在约 1.8–2.0× 之间波动，尚未稳定达标；
+- 跨语言参考显示 Oort 仍比 CPython 慢数百倍，Node 数字仅作下限。
 
 ### 6.2 目标
 
 - **正确性**：VM 与解释器在全部测试程序上结果/错误一致（差分测试）。
 - **VM v1**：宏基准 ≥ 2× 树遍历解释器；micro 与启动不出现回归。
-  （2026-11-21：fib(15) 与 loop 10000 已达标，见 §6.5。）
+  （当前 fib 已达标，loop 仍需优化。）
 - **VM v1.1**：宏基准 ≥ 5×；fib(25) < 5 s；100 万次循环 < 5 s；
   100 万次方法分派 < 10 s（本机）。
 - **可用级别（stretch）**：宏基准耗时进入 CPython 的 20–30 倍以内。
@@ -145,32 +132,16 @@ Windows / Ryzen 7 5800H，`pytest benchmarks/`，中位数；程序已预先编�
 - 每次性能结论必须同时给出：同机 Oort VM vs 树遍历解释器的倍数，以及
   CPython 参考倍数；否则不能称为“可用”。
 - 手动参考套件：`benchmarks/reference/`（内部计时、100ms 自适应重复、
-  结果校验、启动单独测量）。运行说明与 caveat 见该目录 README。
+  结果校验、启动单独测量）。运行说明与 caveat 见该目录 README；结果统一
+  记录在 [`benchmarks/RESULTS.md`](https://github.com/fyabc/oort-lang.py/blob/main/benchmarks/RESULTS.md)。
 
-### 6.4 首次跨语言参考（2026-11-21）
+### 6.4 更新流程
 
-`--repeat 3`，Ryzen 7 5800H / Windows；exec 为单次 workload 内部计时：
-
-| 运行时 | fib(20) | loop 20000 | methods 5000 | 启动 |
-|---|---:|---:|---:|---:|
-| Oort tree-walker | 1093 ms | 368 ms | 230 ms | 497 ms |
-| Python 3.12 | 1.33 ms | 1.30 ms | 0.58 ms | 42 ms |
-| Node 24.15 | 0.066 ms | 0.006 ms | 0.002 ms | 51 ms |
-| Ruby 4.0.10 | 0.56 ms | 0.33 ms | 0.27 ms | 143 ms |
-| Lua 5.4.8 | 0.37 ms | 0.077 ms | 0.16 ms | 6 ms |
-
-Oort 当前约为 CPython 的 280–825 倍耗时。Node 的数字受 JIT 消除影响，只作
-下限；Ruby/Lua 作语境参考。预算与目标见 §6.2。
-
-### 6.5 字节码 VM 第一切片（2026-11-21）
-
-`benchmarks/test_vm.py`，本机中位数；同一 HIR-supported 程序：
-
-| 基准 | 树遍历解释器 | 字节码 VM | 加速 |
-|---|---:|---:|---:|
-| fib(15) | 102.45 ms | 18.74 ms | 5.47× |
-| loop 10000 | 178.35 ms | 76.23 ms | 2.34× |
-
-另用 fib(20) 做过一次粗测：解释器约 1283 ms，VM 约 206 ms（约 6.2×）。
-VM 当前只覆盖 HIR 第一子集（标量、函数、分支、循环），集合/类/模块尚未进入；
-`-t eval` 仍是默认后端。
+1. 运行 `pytest benchmarks/ --benchmark-json=benchmark.json` 和
+   `benchmarks/reference/run.py --json > reference.json`；
+2. 运行 `python benchmarks/report.py --benchmark benchmark.json --reference reference.json`
+   重新生成 RESULTS；需要时用 `--check` 验证已提交版本未漂移；
+3. 只手工更新 `benchmarks/history.json` 的历史里程碑元数据；
+4. 只有当结论跨过目标线时，才在本文/roadmap 更新一句结论并链接结果页；
+5. 不提交 benchmark JSON、profile 或临时图表；长期趋势由 CI benchmark
+   工作流维护。

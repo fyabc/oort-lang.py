@@ -1,31 +1,31 @@
 ---
-name: Feature / language proposal
-about: Suggest a language feature, library addition or tooling change
+name: 功能 / 语言提案
+about: 提议一项语言特性、库补充或工具链变更
 title: ""
 labels: enhancement
 assignees: ""
 ---
 
-## Summary
+## 摘要
 
-<!-- One paragraph: what do you want to add or change? -->
+<!-- 一段话：你想添加或更改什么？ -->
 
-## Motivation
+## 动机
 
-<!-- What problem does it solve? What is painful today? -->
+<!-- 它解决什么问题？目前哪里令人痛苦？ -->
 
-## Proposed design
+## 提议设计
 
 ```oort
 # syntax / usage sketch
 ```
 
-## Orthogonality and scope
+## 正交性与范围
 
-- Which existing feature does it interact with?
-- What is explicitly out of scope?
-- Does it need a proposal in `docs/proposals/`?
+- 它与哪些现有功能交互？
+- 哪些内容明确不在范围内？
+- 它是否需要在 `docs/proposals/` 中提交提案？
 
-## Alternatives considered
+## 考虑过的替代方案
 
-## Additional context
+## 附加信息

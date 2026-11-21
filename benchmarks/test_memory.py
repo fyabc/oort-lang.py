@@ -5,10 +5,8 @@
 import tracemalloc
 
 from benchmarks.bench_utils import compile_and_run
+from benchmarks.limits import PROGRAM_MEMORY_LIMIT, RUNTIME_MEMORY_LIMIT
 from oort_lang.runtime import Runtime
-
-_RUNTIME_LIMIT = 32 * 1024 * 1024
-_PROGRAM_LIMIT = 16 * 1024 * 1024
 
 
 def _peak_bytes(func) -> int:
@@ -23,7 +21,7 @@ def _peak_bytes(func) -> int:
 
 def test_runtime_peak_memory():
     peak = _peak_bytes(Runtime)
-    assert peak < _RUNTIME_LIMIT, f"Runtime allocated {peak} bytes"
+    assert peak < RUNTIME_MEMORY_LIMIT, f"Runtime allocated {peak} bytes"
 
 
 def test_program_peak_memory():
@@ -35,4 +33,4 @@ for i in range(1000) {
 total
 """
     peak = _peak_bytes(lambda: compile_and_run(source))
-    assert peak < _PROGRAM_LIMIT, f"Program allocated {peak} bytes"
+    assert peak < PROGRAM_MEMORY_LIMIT, f"Program allocated {peak} bytes"

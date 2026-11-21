@@ -134,7 +134,7 @@ pre-commit install
 uv run pytest tests/
 uv run pytest tests/ -m slow
 
-# 基准测试
+# 基准测试（结果见 benchmarks/RESULTS.md）
 uv run pytest benchmarks/
 
 # 代码质量

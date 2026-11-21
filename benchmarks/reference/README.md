@@ -5,7 +5,8 @@
 各运行时的 JIT/GC/整数语义、启动与预热差异都会影响结果。
 
 主对比始终是 **Oort 树遍历解释器 vs Oort VM**（同程序、同结果、同机）。
-预算与目标见 `docs/design/08-performance-benchmarking.md`。
+预算与目标见 `docs/design/08-performance-benchmarking.md`；结果见
+[../RESULTS.md](../RESULTS.md)。
 
 ## 运行时
 
@@ -43,20 +44,11 @@ uv run --frozen python benchmarks/reference/run.py \
 Node 的优化 JIT 可能把简单循环或字段更新折叠掉，因此其数字只作下限，
 不要据此做优化决策。Lua 的 `os.clock` 精度为毫秒，100 ms 目标保证它可测。
 
-## 首次结果（2026-11-21，Ryzen 7 5800H，Windows）
+## 结果
 
-`--repeat 3`；exec 为单次工作负载内部计时，startup 为空程序的进程实际耗时：
-
-| 运行时 | fib | loop | methods | startup |
-|---|---:|---:|---:|---:|
-| Oort 树遍历 | 1093 ms | 368 ms | 230 ms | 497 ms |
-| Python 3.12 | 1.33 ms | 1.30 ms | 0.58 ms | 42 ms |
-| Node 24.15 | 0.066 ms | 0.006 ms | 0.002 ms | 51 ms |
-| Ruby 4.0.10 | 0.56 ms | 0.33 ms | 0.27 ms | 143 ms |
-| Lua 5.4.8 | 0.37 ms | 0.077 ms | 0.16 ms | 6 ms |
-
-当前 Oort 约为 CPython 的 280–825 倍耗时。VM 预算先在宏基准上做到 2×，
-再争取 5×；CPython 比值只用于 sanity check。
+当前跨语言结果（含环境、日期、Node JIT caveat）统一记录在
+[../RESULTS.md](../RESULTS.md)。
+本文件只保留运行时列表、工作负载定义和 caveat，避免数字重复漂移。
 
 ## 运行
 
@@ -67,8 +59,8 @@ uv run --frozen python benchmarks/reference/run.py
 # 快速检查
 uv run --frozen python benchmarks/reference/run.py --repeat 1 --workload fib
 
-# 机器可读输出（结果文件不要提交）
-uv run --frozen python benchmarks/reference/run.py --json
+# 机器可读输出（供 benchmarks/report.py 使用，结果文件不要提交）
+uv run --frozen python benchmarks/reference/run.py --json > reference.json
 ```
 
 结果只打印到终端；不提交 JSON 或 profiler 产物。

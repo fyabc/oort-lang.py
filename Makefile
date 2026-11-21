@@ -1,4 +1,4 @@
-.PHONY: help install dev test test-slow benchmark benchmark-json lint format format-check type-check imports security audit deps dead-code property markdown docs docs-serve quality clean build-grammar check
+.PHONY: help install dev test test-slow benchmark benchmark-json benchmark-reference-json benchmark-report benchmark-report-check lint format format-check type-check imports security audit deps dead-code property markdown docs docs-serve quality clean build-grammar check
 
 help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -20,6 +20,15 @@ benchmark: ## Run benchmarks
 
 benchmark-json: ## Run benchmarks and write benchmark.json
 	uv run pytest benchmarks/ --benchmark-json=benchmark.json -q
+
+benchmark-reference-json: ## Run manual cross-language benchmarks as reference.json
+	uv run python benchmarks/reference/run.py --repeat 5 --json > reference.json
+
+benchmark-report: ## Regenerate benchmarks/RESULTS.md from JSON inputs
+	uv run python benchmarks/report.py --benchmark benchmark.json --reference reference.json
+
+benchmark-report-check: ## Verify RESULTS.md matches the JSON inputs
+	uv run python benchmarks/report.py --benchmark benchmark.json --reference reference.json --check
 
 lint: ## Run linters
 	uv run ruff check src/ tests/ benchmarks/ scripts/
@@ -52,7 +61,7 @@ property: ## Run property-based tests
 	uv run --with hypothesis pytest tests/property -q
 
 markdown: ## Lint Markdown documents
-	npx --yes markdownlint-cli2@0.18.1 "README.md" "CONTRIBUTING.md" "docs/**/*.md" "benchmarks/README.md" "tests/README.md"
+	npx --yes markdownlint-cli2@0.18.1 "README.md" "CONTRIBUTING.md" "SECURITY.md" "CHANGELOG.md" "docs/**/*.md" "benchmarks/README.md" "benchmarks/RESULTS.md" "benchmarks/reference/README.md" "tests/README.md" ".github/**/*.md"
 
 docs: ## Build the documentation site
 	uv run --frozen --with "mkdocs-material>=9.6" mkdocs build --strict

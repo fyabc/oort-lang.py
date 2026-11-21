@@ -1,29 +1,21 @@
-# Security Policy
+# 安全策略
 
-## Supported versions
+## 支持的版本
 
-Oort is an early-stage project. Only the latest `main` branch and the most recent
-release receive fixes. Version `0.2.x` is experimental and should not be used
-where untrusted input is executed.
+Oort 是一个早期阶段的项目。只有最新的 `main` 分支和最近的发行版本会获得修复。版本 `0.2.x` 是实验性的，不应在会执行不可信输入的场景中使用。
 
-## Reporting a vulnerability
+## 报告漏洞
 
-Please **do not** open a public issue for security problems.
+请**不要**为安全问题公开创建 issue。
 
-Use GitHub's private vulnerability reporting:
+请使用 GitHub 的私有漏洞报告功能：
 
-1. Go to the repository's **Security** tab.
-2. Choose **Report a vulnerability**.
-3. Include a minimal `.ort` reproducer, the command used, and the observed
-   behavior.
+1. 转到仓库的 **Security** 标签页。
+2. 选择 **Report a vulnerability**。
+3. 包含最小的 `.ort` 复现程序、所使用的命令以及观察到的行为。
 
-We will acknowledge the report, investigate, and coordinate a fix and disclosure
-timeline with you.
+我们将确认报告、展开调查，并与你协调修复和披露的时间表。
 
-## Scope notes
+## 范围说明
 
-The interpreter executes Oort source code with the privileges of the Python
-process. Running untrusted `.ort` files is equivalent to running untrusted
-Python code; there is no sandbox. Reports about that design are out of scope,
-but parser crashes, unbounded resource use reachable from a file, and
-diagnostic-path information leaks are in scope.
+解释器以 Python 进程的权限执行 Oort 源代码。运行不可信的 `.ort` 文件等同于运行不可信的 Python 代码；不存在沙箱。关于该设计的报告不在范围内，但解析器崩溃、可由文件触发的无界资源占用以及诊断路径信息泄露在范围内。
