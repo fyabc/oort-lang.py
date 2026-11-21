@@ -12,6 +12,7 @@ and exercises the real compiler pipeline, not a stripped-down harness.
 | `test_startup.py` | startup | compiler/runtime construction, empty program |
 | `test_memory.py` | memory | peak allocation ceilings for a runtime and a program |
 | `test_ast_interpreter.py` | macro | historical Fibonacci baseline |
+| `test_vm.py` | macro | same HIR-supported program on interpreter vs bytecode VM |
 
 ## Running
 

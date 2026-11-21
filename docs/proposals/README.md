@@ -25,7 +25,7 @@
 | [0001](0001-feature-layers-and-dialects.md) | 特性分层与语言方言（防止 C++ 化） | Accepted |
 | [0002](0002-dsl-support.md) | 嵌入式 DSL 支持 | Proposed |
 | [0003](0003-grammar-cleanup.md) | 文法清理与语义收紧 | Implemented |
-| [0004](0004-bytecode-vm.md) | 字节码虚拟机（重新实现） | Draft |
+| [0004](0004-bytecode-vm.md) | 字节码虚拟机（重新实现） | Accepted（第一切片实现中） |
 | [0005](0005-type-system.md) | 类型系统、泛型、ADT 与模式匹配 | Draft |
 | [0006](0006-modules-and-imports.md) | 模块与导入系统 | Implemented |
 | [0007](0007-oort-object-object-model.md) | `oort-object` 动态对象模型 | Implemented |

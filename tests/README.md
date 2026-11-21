@@ -7,7 +7,7 @@ tests/
 ├── assets/              # 固定的 .ort 源文件与期望 AST
 ├── unit/
 │   ├── frontend/        # 词法、token 后处理、解析、AST、语义分析、Binding、诊断
-│   ├── backend/         # HIR lowering、字节码编码/反汇编与结构校验（VM 后续）
+│   ├── backend/         # HIR lowering、字节码编码/反汇编、VM 与差分测试
 │   └── runtime/         # 解释器、函数/类/容器、模块加载、宿主边界、标准库、
 │                        # 迭代器与扩展方法
 ├── property/            # hypothesis 属性测试（CI 用 --with hypothesis）

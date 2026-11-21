@@ -1,8 +1,8 @@
 # HIR 设计（共享后端）
 
-> **状态**：HIR 与 32 位字节码编码/反汇编第一切片已实现
-> （`src/oort_lang/hir/`、`src/oort_lang/bytecode/`）。VM 与解释器差分测试
-> 尚未开始。字节码 ISA 参考
+> **状态**：HIR、32 位字节码编码/反汇编与寄存器 VM 第一切片已实现
+> （`src/oort_lang/hir/`、`bytecode/`、`runtime/bytecode_vm.py`）。`-t eval`
+> 仍是默认；差分测试已覆盖当前 HIR 子集。字节码 ISA 参考
 > [02-bytecode-vm-design.md](02-bytecode-vm-design.md)，重实现约束见
 > [OP 0004](../proposals/0004-bytecode-vm.md)。
 
@@ -110,10 +110,19 @@ dump 用于调试。
 - `-t bc` 打印反汇编（文件名保持 `-t ast`/`-t astm` 的调试风格）；`eval`
   仍是默认执行后端。
 
-## 8. 下一步
+## 8. 寄存器 VM（第一切片）
 
-1. 寄存器式 VM：帧、常量池、全局表、调用约定、迭代器/运算符复用解释器
-   语义；未支持值类型显式报错。
-2. 保持 `-t eval` 默认，增加后端选择开关；VM 差分测试通过后再考虑默认切换。
-3. `benchmarks/test_vm.py`：同一程序 interpreter vs VM 配对基准。
-4. 差分测试通过后逐步扩展到集合、属性/下标、类、模块与 core 方言。
+- `runtime/bytecode_vm.py`：Python 调用栈帧、寄存器数组、常量/字节码解码缓存、
+  全局名缓存；复用现有 `Environment`、内建环境、类型对象、运算符调度和
+  迭代器协议。
+- 顶层函数由 `DEF_FUN` 创建 `OortVMFunction`；VM 内调用直接进入新帧，内建函数
+  仍走 `call_value`。VM 函数暂不能作为一等值传给 `map` 等原生高阶助手。
+- Int 算术/比较和一元运算有快速路径；其余类型回退到解释器的
+  `apply_binary`/`apply_unary`，除法零仍产生带位置的 `OortRuntimeError`。
+- `-t vm` 执行当前 HIR 子集；`-t eval` 保持默认，未支持的构造由 HIR 明确拒绝。
+
+## 9. 下一步
+
+1. 扩大 HIR/VM 子集：集合、属性/下标、类/方法、模块与 core 方言。
+2. 对 VM 与解释器做更广的差分/错误路径测试；逐步把 CLI 默认后端切到 VM。
+3. 继续优化：寄存器复用、常量内联、当前帧内联、类型特化；用基准证明。

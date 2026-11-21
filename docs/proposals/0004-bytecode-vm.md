@@ -1,8 +1,8 @@
 # OP 0004: 字节码虚拟机（重新实现）
 
-- **状态**：Draft
+- **状态**：Accepted（第一切片实现中，2026-11-21）
 - **作者**：Oort 设计讨论
-- **相关**：[设计笔记 02](../design/02-bytecode-vm-design.md)、[OP 0001](0001-feature-layers-and-dialects.md)
+- **相关**：[设计笔记 02](../design/02-bytecode-vm-design.md)、[HIR 设计 13](../design/13-hir-design.md)、[OP 0001](0001-feature-layers-and-dialects.md)
 
 ## 摘要
 
@@ -56,8 +56,32 @@ Oort 需要一个寄存器式字节码 VM 作为动态方言的高性能后端�
 2. **直接生成 Python 代码并缓存**：开发快，但无法体现编译原理教学价值。
 3. **直接上 LLVM**：需要类型信息与内存模型，过早。
 
+## 实现进展（2026-11-21 第一切片）
+
+- **HIR**：`src/oort_lang/hir/` 线性寄存器 HIR（常量、局部/全局、算术、跳转、
+  调用、返回、迭代器、函数定义），动态子集 lowering 与结构校验；未实现节点
+  在 lowering 阶段显式抛 `UnsupportedSyntax`。设计见
+  [HIR 设计 13](../design/13-hir-design.md)。
+- **字节码**：`src/oort_lang/bytecode/` 32 位 ABC/ABx/AsBx/Ax、常量池、
+  相对跳转回填、line_table、`Proto`、反汇编；`-t bc` 可查看。
+- **VM**：`runtime/bytecode_vm.py` 寄存器帧，复用 Environment/内建/类型/运算符/
+  迭代器协议；`-t vm` 执行当前子集。Int 算术/比较/一元快速路径，其余回退
+  解释器语义；字面量每次求值重新包装以保持 `is` 的身份语义。
+- **约束落实**：调用使用 scratch 区约定；`ITER_NEXT` 展开为两字；
+  未支持 opcode/构造显式报错，不做默认穿透。
+- **基准**（本机中位数，`benchmarks/test_vm.py`）：fib(15) 解释器 102.45ms →
+  VM 18.74ms（5.47×）；loop 10000 178.35ms → 76.23ms（2.34×）。fib(20) 粗测
+  约 6.2×。
+- **当前范围**：标量、函数/递归、分支、while/for(range/字符串)、局部/全局。
+  集合、属性/下标、类/方法、模块与 core 方言尚未进入 VM；`-t eval` 仍是默认。
+- **后续**：扩大 HIR/VM 子集、完善差分与错误路径测试、再切换默认后端；
+  之后是寄存器复用/内联缓存/类型特化等优化。
+
 ## 未解决问题
 
 - 闭包捕获与 `for` 循环“每迭代新绑定”的语义如何在 VM 中保持？
+  第一切片尚不支持闭包；`for` 循环变量复用寄存器，不承诺捕获语义。
 - 异常（`break`/`continue`/`return`）用字节码跳转还是异常表？
+  第一切片只支持 `return`（`RET`）；`break`/`continue` 在 HIR 显式拒绝。
 - 是否需要 `comptime` 共享同一 VM（见 [OP 0005](0005-type-system.md)）？
+  暂不决定，等 VM 子集扩大后再评估。
