@@ -22,6 +22,18 @@ HIR 是 AST 与字节码之间的**线性寄存器中间表示**：
   （OP 0004 的核心教训）。
 - 先保证语义正确，再做寄存器复用、常量池和类型特化。
 
+### 1.1 后端文档关系
+
+| 文档 | 角色 |
+|---|---|
+| 本文（13） | **当前实现参考**：已支持子集、HIR 指令、编码约定、VM 行为 |
+| [02-bytecode-vm-design.md](02-bytecode-vm-design.md) | 长期设计目标：ISA 备选、寄存器分配、JIT 路线；未实现部分不作为规范 |
+| [OP 0004](../proposals/0004-bytecode-vm.md) | 决策与实现进展记录（为什么做、做到哪一步） |
+| [08-performance-benchmarking.md](08-performance-benchmarking.md) | 基准方法与 VM/解释器对比 |
+
+正式的 HIR/字节码/VM 规范尚未编写；当前以本文、`opcodes.py` 与差分测试为
+事实来源。等默认后端/优化方向稳定后再提炼为 `docs/spec` 下的规范性文档。
+
 ## 2. 第一切片范围
 
 支持的子集：
