@@ -6,8 +6,13 @@ from .dump import format_function, format_instruction, format_module
 from .lower import HirLowerer, lower_module
 from .nodes import (
     BinOp,
+    BuildDict,
+    BuildList,
+    BuildSet,
+    BuildTuple,
     Call,
     DefineFunction,
+    GetItem,
     HirFunction,
     HirModule,
     Instruction,
@@ -22,6 +27,7 @@ from .nodes import (
     Move,
     OpenIterator,
     Return,
+    SetItem,
     StoreGlobal,
     StoreLocal,
     UnOp,
@@ -30,8 +36,13 @@ from .nodes import (
 
 __all__ = [
     "BinOp",
+    "BuildDict",
+    "BuildList",
+    "BuildSet",
+    "BuildTuple",
     "Call",
     "DefineFunction",
+    "GetItem",
     "HirFunction",
     "HirLowerer",
     "HirModule",
@@ -47,6 +58,7 @@ __all__ = [
     "Move",
     "OpenIterator",
     "Return",
+    "SetItem",
     "StoreGlobal",
     "StoreLocal",
     "UnOp",

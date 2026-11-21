@@ -15,10 +15,20 @@ from ..bytecode.opcodes import (
     UNARY_OPCODES,
     Op,
 )
+from ..diagnostics import OortException
 from ..diagnostics.runtime_errors import OortNameError, OortRuntimeError, OortTypeError
 from ..source.source_position import SourcePosition
 from .environment import Environment
-from .objects import OortBool, OortFloat, OortInt, OortObject
+from .objects import (
+    OortBool,
+    OortDict,
+    OortFloat,
+    OortInt,
+    OortList,
+    OortObject,
+    OortSet,
+    OortTuple,
+)
 
 _BINARY_SYMBOLS = {opcode: symbol for symbol, opcode in BINARY_OPCODES.items()}
 _UNARY_SYMBOLS = {opcode: symbol for symbol, opcode in UNARY_OPCODES.items()}
@@ -134,6 +144,37 @@ class BytecodeVM:
                     pc = pc + 1 + decoded.sbx
                 else:
                     pc += 1
+            elif op is Op.NEW_LIST:
+                registers[a] = OortList([registers[b + index] for index in range(c)])
+                pc += 1
+            elif op is Op.NEW_TUPLE:
+                registers[a] = OortTuple(tuple(registers[b + index] for index in range(c)))
+                pc += 1
+            elif op is Op.NEW_SET:
+                registers[a] = OortSet({registers[b + index] for index in range(c)})
+                pc += 1
+            elif op is Op.NEW_DICT:
+                mapping: dict[OortObject, OortObject] = {}
+                for index in range(c):
+                    mapping[registers[b + 2 * index]] = registers[b + 2 * index + 1]
+                registers[a] = OortDict(mapping)
+                pc += 1
+            elif op is Op.GET_ITEM:
+                try:
+                    registers[a] = registers[b][registers[c]]
+                except OortException:
+                    raise
+                except Exception as exc:
+                    raise OortRuntimeError(str(exc), position) from exc
+                pc += 1
+            elif op is Op.SET_ITEM:
+                try:
+                    registers[a][registers[b]] = registers[c]
+                except OortException:
+                    raise
+                except Exception as exc:
+                    raise OortRuntimeError(str(exc), position) from exc
+                pc += 1
             elif op is Op.CALL:
                 callee = registers[a]
                 call_args = [registers[a + 1 + index] for index in range(c)]

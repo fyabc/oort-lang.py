@@ -16,8 +16,13 @@ from ..diagnostics.syntax_errors import UnsupportedSyntax
 from ..source.source_position import SourcePosition
 from .nodes import (
     BinOp,
+    BuildDict,
+    BuildList,
+    BuildSet,
+    BuildTuple,
     Call,
     DefineFunction,
+    GetItem,
     HirFunction,
     HirModule,
     Instruction,
@@ -32,6 +37,7 @@ from .nodes import (
     Move,
     OpenIterator,
     Return,
+    SetItem,
     StoreGlobal,
     StoreLocal,
     UnOp,
@@ -219,8 +225,14 @@ class HirLowerer:
     def _lower_assignment(self, node: nodes.Assignment) -> int | None:
         if node.op.text != "=":
             self._reject(node, "augmented assignment")
+        if isinstance(node.lhs, nodes.Subscript):
+            container = self._require_value(node.lhs.value)
+            index = self._require_value(node.lhs.index)
+            rhs_value = self._require_value(node.rhs)
+            self._emit(SetItem(node.lhs.position, container, index, rhs_value))
+            return None
         if not isinstance(node.lhs, nodes.Name):
-            self._reject(node, "attribute/subscript assignment")
+            self._reject(node, "attribute/tuple assignment")
         value = self._lower_expr(node.rhs)
         if value is None:
             value = self._const(None, node.position)
@@ -284,7 +296,39 @@ class HirLowerer:
             return self._lower_assignment(node)
         if isinstance(node, nodes.ReturnExpr):
             return self._lower_stmt(node)
+        if isinstance(node, nodes.ListLiteral):
+            return self._lower_sequence(node.elements, BuildList, node.position)
+        if isinstance(node, nodes.TupleLiteral):
+            return self._lower_sequence(node.elements, BuildTuple, node.position)
+        if isinstance(node, nodes.SetLiteral):
+            return self._lower_sequence(node.elements, BuildSet, node.position)
+        if isinstance(node, nodes.DictLiteral):
+            return self._lower_dict(node)
+        if isinstance(node, nodes.Subscript):
+            container = self._require_value(node.value)
+            index = self._require_value(node.index)
+            dst = self._alloc(node.position)
+            self._emit(GetItem(node.position, dst, container, index))
+            return dst
+        if isinstance(node, nodes.SliceLiteral):
+            self._reject(node, "slices")
         self._reject(node, type(node).__name__)
+
+    def _lower_sequence(self, elements, instruction, position) -> int:
+        values = tuple(self._require_value(element) for element in elements)
+        dst = self._alloc(position)
+        self._emit(instruction(position, dst, values))
+        return dst
+
+    def _lower_dict(self, node: nodes.DictLiteral) -> int:
+        items: list[tuple[int, int]] = []
+        for key, value in node.items:
+            if key is None:
+                self._reject(node, "dict unpacking")
+            items.append((self._require_value(key), self._require_value(value)))
+        dst = self._alloc(node.position)
+        self._emit(BuildDict(node.position, dst, tuple(items)))
+        return dst
 
     def _lower_name(self, node: nodes.Name) -> int:
         binding = node.binding

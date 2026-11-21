@@ -51,6 +51,25 @@ print("a" + "b")
 print(1 is 1, null is null, not false)
 """,
     """\
+var xs = [1, 2, 3]
+print(xs[0], len(xs))
+xs[1] = 9
+print(xs)
+for x in xs {
+    print(x)
+}
+""",
+    """\
+val pair = (1, "a")
+val d = {: "a": 1, "b": 2 :}
+val s = {. 1, 2 .}
+print(pair[1], d["a"], len(d), len(s), 2 in s)
+for key in d {
+    print(key)
+}
+print([[1], [2]][0][0], "abc"[1])
+""",
+    """\
 for c in "abc" {
     print(c)
 }
@@ -74,6 +93,24 @@ def test_vm_matches_interpreter(source: str, capsys: pytest.CaptureFixture):
     vm_out = capsys.readouterr().out
     assert vm_out == eval_out
     assert vm_value == eval_value
+
+
+def test_vm_reports_collection_errors(caplog: pytest.LogCaptureFixture):
+    compiler = get_compiler(["NOT_EXIST", "-t", "vm"])
+    with pytest.raises(CompilerError):
+        compiler.run_string("""\
+val t = (1, 2)
+t[0] = 3
+""")
+    assert "does not support item assignment" in caplog.text
+
+    compiler = get_compiler(["NOT_EXIST", "-t", "vm"])
+    with pytest.raises(CompilerError):
+        compiler.run_string("""\
+val d = {: "a": 1 :}
+print(d["b"])
+""")
+    assert "'b'" in caplog.text
 
 
 def test_vm_returns_last_value():

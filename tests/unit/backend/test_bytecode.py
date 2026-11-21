@@ -95,6 +95,25 @@ def test_call_arguments_use_scratch_registers():
     assert call.a + call.c < proto.register_count
 
 
+def test_collections_compile_to_build_and_item_opcodes():
+    module = compile_source(
+        """var xs = [1, 2]
+xs[0] = 3
+print(xs[1], {: "a": 1 :}["a"])
+"""
+    )
+    ops = {decode(word).op for word in module.main.code}
+    assert Op.NEW_LIST in ops
+    assert Op.NEW_DICT in ops
+    assert Op.GET_ITEM in ops
+    assert Op.SET_ITEM in ops
+    text = disassemble_module(module)
+    assert "NEW_LIST" in text
+    assert "NEW_DICT" in text
+    assert "GET_ITEM" in text
+    assert "SET_ITEM" in text
+
+
 def test_disassembly_mentions_protos_and_calls():
     text = disassemble_module(compile_source("def f(a) { a }\nprint(f(1))\n"))
     assert "Proto <main>" in text

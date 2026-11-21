@@ -60,6 +60,13 @@ class Op(IntEnum):
     OPEN_ITER = 45
     ITER_NEXT = 46
 
+    NEW_LIST = 50
+    NEW_TUPLE = 51
+    NEW_SET = 52
+    NEW_DICT = 53
+    GET_ITEM = 54
+    SET_ITEM = 55
+
     EXTEND = 47
 
 
@@ -104,6 +111,12 @@ OP_FORMAT: dict[Op, str] = {
     Op.RET: _FORMAT_ABC,
     Op.OPEN_ITER: _FORMAT_ABC,
     Op.ITER_NEXT: _FORMAT_ABC,
+    Op.NEW_LIST: _FORMAT_ABC,
+    Op.NEW_TUPLE: _FORMAT_ABC,
+    Op.NEW_SET: _FORMAT_ABC,
+    Op.NEW_DICT: _FORMAT_ABC,
+    Op.GET_ITEM: _FORMAT_ABC,
+    Op.SET_ITEM: _FORMAT_ABC,
     Op.EXTEND: _FORMAT_AX,
 }
 

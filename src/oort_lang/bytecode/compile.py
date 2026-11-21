@@ -7,8 +7,13 @@ import dataclasses
 from ..diagnostics.syntax_errors import UnsupportedSyntax
 from ..hir.nodes import (
     BinOp,
+    BuildDict,
+    BuildList,
+    BuildSet,
+    BuildTuple,
     Call,
     DefineFunction,
+    GetItem,
     HirFunction,
     HirModule,
     Instruction,
@@ -23,6 +28,7 @@ from ..hir.nodes import (
     Move,
     OpenIterator,
     Return,
+    SetItem,
     StoreGlobal,
     StoreLocal,
     UnOp,
@@ -89,7 +95,33 @@ class _ProtoCompiler:
         self.has_iterator = any(
             isinstance(instruction, IteratorNext) for instruction in function.code
         )
-        self.scratch = max(self.max_args + 1, 1 if self.has_iterator else 0)
+        build_elements = max(
+            (
+                len(instruction.elements)
+                for instruction in function.code
+                if isinstance(instruction, (BuildList, BuildTuple, BuildSet))
+            ),
+            default=0,
+        )
+        build_dict_slots = max(
+            (
+                2 * len(instruction.items)
+                for instruction in function.code
+                if isinstance(instruction, BuildDict)
+            ),
+            default=0,
+        )
+        has_build = any(
+            isinstance(instruction, (BuildList, BuildTuple, BuildSet, BuildDict))
+            for instruction in function.code
+        )
+        self.scratch = max(
+            self.max_args + 1,
+            1 if self.has_iterator else 0,
+            1 if has_build else 0,
+            build_elements,
+            build_dict_slots,
+        )
         self.register_count = function.local_count + self.scratch
         if self.register_count > _MAX_REGISTERS:
             raise UnsupportedSyntax(
@@ -184,6 +216,46 @@ class _ProtoCompiler:
         if isinstance(instruction, JumpIfTrue):
             self._emit_jump(Op.JUMP_TRUE, instruction.src, instruction.target, position)
             return
+        if isinstance(instruction, (BuildList, BuildTuple, BuildSet)):
+            opcode = {
+                "BuildList": Op.NEW_LIST,
+                "BuildTuple": Op.NEW_TUPLE,
+                "BuildSet": Op.NEW_SET,
+            }[type(instruction).__name__]
+            self._emit_build(opcode, instruction.dst, instruction.elements, position)
+            return
+        if isinstance(instruction, BuildDict):
+            values = tuple(reg for pair in instruction.items for reg in pair)
+            self._emit_build(
+                Op.NEW_DICT,
+                instruction.dst,
+                values,
+                position,
+                count=len(instruction.items),
+            )
+            return
+        if isinstance(instruction, GetItem):
+            self._word(
+                encode_abc(
+                    Op.GET_ITEM,
+                    instruction.dst,
+                    instruction.container,
+                    instruction.index,
+                ),
+                position,
+            )
+            return
+        if isinstance(instruction, SetItem):
+            self._word(
+                encode_abc(
+                    Op.SET_ITEM,
+                    instruction.container,
+                    instruction.index,
+                    instruction.src,
+                ),
+                position,
+            )
+            return
         if isinstance(instruction, Call):
             self._emit_call(instruction, position)
             return
@@ -222,6 +294,23 @@ class _ProtoCompiler:
             f"Bytecode backend does not support HIR {type(instruction).__name__}.",
             position,
         )
+
+    def _emit_build(
+        self,
+        opcode: Op,
+        dst: int,
+        values: tuple[int, ...],
+        position: SourcePosition,
+        *,
+        count: int | None = None,
+    ) -> None:
+        item_count = len(values) if count is None else count
+        if item_count > 0xFF:
+            raise UnsupportedSyntax("Collection literal has more than 255 elements.", position)
+        base = self.scratch_base
+        for index, register in enumerate(values):
+            self._word(encode_abc(Op.MOVE, base + index, register, 0), position)
+        self._word(encode_abc(opcode, dst, base, item_count), position)
 
     def _emit_call(self, instruction: Call, position: SourcePosition) -> None:
         nargs = len(instruction.args)

@@ -6,8 +6,11 @@ import pytest
 
 from oort_lang.diagnostics.syntax_errors import UnsupportedSyntax
 from oort_lang.hir import (
+    BuildDict,
+    BuildList,
     Call,
     DefineFunction,
+    GetItem,
     JumpIfFalse,
     JumpIfTrue,
     Label,
@@ -86,6 +89,19 @@ print(total)
     assert labels
 
 
+def test_collection_literals_and_subscripts_lower():
+    module = lower(
+        """var xs = [1, 2]
+xs[0] = 3
+print(xs[1], {: "a": 1 :}["a"])
+"""
+    )
+    code = module.main.code
+    assert any(isinstance(i, BuildList) for i in code)
+    assert any(isinstance(i, BuildDict) for i in code)
+    assert any(isinstance(i, GetItem) for i in code)
+
+
 def test_logical_operators_short_circuit_with_jumps():
     module = lower(
         """\
@@ -102,8 +118,8 @@ print(true or false)
     [
         ("class C {}\n", "ClassDef"),
         ("val f = do: 1\n", "FunctionDef"),
-        ("val xs = [1]\n", "ListLiteral"),
-        ("var x = 1\nprint(x[0])\n", "Subscript"),
+        ("print([1][0:1])\n", "slices"),
+        ("var x = 1\nprint(x.foo)\n", "Attribute"),
         ("def f(a) { a }\nf(a = 1)\n", "keyword"),
         ("for a, b in [1] { print(a) }\n", "multiple loop"),
         (

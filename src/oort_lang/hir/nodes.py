@@ -100,6 +100,44 @@ class Label(Instruction):
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class BuildList(Instruction):
+    dst: int
+    elements: tuple[int, ...]
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class BuildTuple(Instruction):
+    dst: int
+    elements: tuple[int, ...]
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class BuildSet(Instruction):
+    dst: int
+    elements: tuple[int, ...]
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class BuildDict(Instruction):
+    dst: int
+    items: tuple[tuple[int, int], ...]
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class GetItem(Instruction):
+    dst: int
+    container: int
+    index: int
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class SetItem(Instruction):
+    container: int
+    index: int
+    src: int
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class Call(Instruction):
     dst: int
     callee: int
@@ -158,6 +196,14 @@ def register_reads(instruction: Instruction) -> tuple[int, ...]:
         return (instruction.operand,)
     if isinstance(instruction, (JumpIfFalse, JumpIfTrue)):
         return (instruction.src,)
+    if isinstance(instruction, (BuildList, BuildTuple, BuildSet)):
+        return instruction.elements
+    if isinstance(instruction, BuildDict):
+        return tuple(reg for pair in instruction.items for reg in pair)
+    if isinstance(instruction, GetItem):
+        return (instruction.container, instruction.index)
+    if isinstance(instruction, SetItem):
+        return (instruction.container, instruction.index, instruction.src)
     if isinstance(instruction, Call):
         return (instruction.callee, *instruction.args)
     if isinstance(instruction, Return):
@@ -173,7 +219,21 @@ def register_writes(instruction: Instruction) -> tuple[int, ...]:
     """Registers written by an instruction."""
     if isinstance(
         instruction,
-        (LoadConst, LoadLocal, LoadGlobal, Move, BinOp, UnOp, Call, OpenIterator),
+        (
+            LoadConst,
+            LoadLocal,
+            LoadGlobal,
+            Move,
+            BinOp,
+            UnOp,
+            Call,
+            OpenIterator,
+            BuildList,
+            BuildTuple,
+            BuildSet,
+            BuildDict,
+            GetItem,
+        ),
     ):
         return (instruction.dst,)
     if isinstance(instruction, IteratorNext):

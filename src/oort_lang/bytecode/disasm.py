@@ -69,6 +69,14 @@ def _format(proto: Proto, pc: int, decoded: Decoded) -> str:
         return f"OPEN_ITER R{decoded.a} R{decoded.b}"
     if op is Op.ITER_NEXT:
         return f"ITER_NEXT R{decoded.a} R{decoded.b} R{decoded.c}"
+    if op in (Op.NEW_LIST, Op.NEW_TUPLE, Op.NEW_SET):
+        return f"{op.name} R{decoded.a} base=R{decoded.b} count={decoded.c}"
+    if op is Op.NEW_DICT:
+        return f"NEW_DICT R{decoded.a} base=R{decoded.b} pairs={decoded.c}"
+    if op is Op.GET_ITEM:
+        return f"GET_ITEM R{decoded.a} R{decoded.b}[R{decoded.c}]"
+    if op is Op.SET_ITEM:
+        return f"SET_ITEM R{decoded.a}[R{decoded.b}] = R{decoded.c}"
     return f"{op.name} A={decoded.a} B={decoded.b} C={decoded.c}"
 
 

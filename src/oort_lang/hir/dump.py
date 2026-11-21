@@ -4,8 +4,13 @@
 
 from .nodes import (
     BinOp,
+    BuildDict,
+    BuildList,
+    BuildSet,
+    BuildTuple,
     Call,
     DefineFunction,
+    GetItem,
     HirFunction,
     HirModule,
     Instruction,
@@ -20,6 +25,7 @@ from .nodes import (
     Move,
     OpenIterator,
     Return,
+    SetItem,
     StoreGlobal,
     StoreLocal,
     UnOp,
@@ -53,6 +59,16 @@ def format_instruction(instruction: Instruction) -> str:
         return f"JMP_TRUE R{instruction.src} {instruction.target}"
     if isinstance(instruction, Label):
         return f"{instruction.name}:"
+    if isinstance(instruction, (BuildList, BuildTuple, BuildSet)):
+        values = ", ".join(f"R{value}" for value in instruction.elements)
+        return f"{type(instruction).__name__.upper()} R{instruction.dst} ({values})"
+    if isinstance(instruction, BuildDict):
+        values = ", ".join(f"R{key}:R{value}" for key, value in instruction.items)
+        return f"BUILD_DICT R{instruction.dst} ({values})"
+    if isinstance(instruction, GetItem):
+        return f"GET_ITEM R{instruction.dst} R{instruction.container}[R{instruction.index}]"
+    if isinstance(instruction, SetItem):
+        return f"SET_ITEM R{instruction.container}[R{instruction.index}] = R{instruction.src}"
     if isinstance(instruction, Call):
         args = ", ".join(f"R{arg}" for arg in instruction.args)
         return f"CALL R{instruction.dst} R{instruction.callee}({args})"
