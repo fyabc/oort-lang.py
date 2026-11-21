@@ -1,8 +1,9 @@
 # HIR 设计（共享后端）
 
-> **状态**：HIR、32 位字节码编码/反汇编与寄存器 VM 第一切片已实现
-> （`src/oort_lang/hir/`、`bytecode/`、`runtime/bytecode_vm.py`）。`-t eval`
-> 仍是默认；差分测试已覆盖当前 HIR 子集。字节码 ISA 参考
+> **状态**：HIR、32 位字节码编码/反汇编与寄存器 VM 第一切片已实现，当前子集
+> 包含 lambda/闭包与一等函数值（`src/oort_lang/hir/`、`bytecode/`、
+> `runtime/bytecode_vm.py`）。`-t eval` 仍是默认；差分测试已覆盖当前 HIR
+> 子集。字节码 ISA 参考
 > [02-bytecode-vm-design.md](02-bytecode-vm-design.md)，重实现约束见
 > [OP 0004](../proposals/0004-bytecode-vm.md)。
 
@@ -25,6 +26,7 @@ HIR 是 AST 与字节码之间的**线性寄存器中间表示**：
 支持的动态子集：
 
 - 模块顶层 `val`/`var`、赋值、函数定义与调用；
+- 函数值/lambda（显式参数与匿名 `$0`/`$1`）、闭包捕获外层局部变量；
 - `Int`/`Float`/`String`/`Bool`/`null` 字面量；
 - List/Tuple/Set/Dict 字面量、下标读取/赋值、切片（读取与赋值）、属性读写；
 - 一元/二元运算、`and`/`or` 短路；
@@ -33,10 +35,11 @@ HIR 是 AST 与字节码之间的**线性寄存器中间表示**：
 
 显式拒绝：
 
-- 类、enum、match、lambda/嵌套函数、扩展方法、运算符方法、泛型；
-- 通过属性/函数值发起的调用、导入、关键字/默认/变长/块参数；
-- `break`/`continue`、`val`/参数赋值、闭包捕获外层函数局部变量、模块级
-  可变重定义（当前按不可变名处理）。
+- 类、enum、match、嵌套函数定义、扩展方法、运算符方法、泛型；
+- 导入、关键字/默认/变长/块参数；
+- `break`/`continue`、`val`/参数/外层 `val` 赋值、模块级可变重定义
+  （当前按不可变名处理）；
+- 循环体内创建 lambda（每迭代新绑定的捕获语义尚未实现）。
 
 这些限制是临时的；后续切片逐项放开并补差分测试。
 
@@ -50,6 +53,8 @@ HIR 是 AST 与字节码之间的**线性寄存器中间表示**：
 | `LOAD_L dst slot` / `STORE_L slot src` | 局部变量 |
 | `LOAD_G dst name` / `STORE_G name src` | 模块/内建全局名 |
 | `DEF_FUN name proto` | 按源码顺序定义函数 |
+| `MAKE_CLOSURE dst proto` | 创建闭包，捕获当前帧 |
+| `LOAD_OUTER dst depth slot` / `STORE_OUTER depth slot src` | 读写外层帧局部槽 |
 | `MOVE dst src` | 寄存器复制 |
 | `BINOP dst op lhs rhs` / `UNOP dst op src` | 运算符，仍走 Oort 语义 |
 | `JUMP label` / `JUMP_FALSE R label` / `JUMP_TRUE R label` | 控制流 |
@@ -73,17 +78,27 @@ HIR 是 AST 与字节码之间的**线性寄存器中间表示**：
 - 主模块顶层名字是**全局**（`LOAD_G`/`STORE_G`）；块内声明是主模块的局部
   寄存器。函数参数与函数内声明都是局部寄存器。
 - lowering 使用词法作用域栈解析名字；`Binding.is_global` 决定全局访问。
-  函数内引用外层函数局部变量（闭包）当前显式拒绝。
+  lambda 内引用外层局部时生成 `LOAD_OUTER depth slot`，`depth` 为按 lowering
+  函数栈计算出的跨帧数。写入外层可变局部（`var`）生成 `STORE_OUTER`；外层
+  `val`/参数写入在 lowering 阶段拒绝。
+- 闭包采用**帧捕获**而非 cell/upvalue 元数据：lambda 值持有定义时的 VM
+  帧，帧再指向其外层帧；`LOAD_OUTER`/`STORE_OUTER` 沿该链访问寄存器。
 - 寄存器单调分配，不复用；上限 256（与设计 02 的 A/B/C 8 位字段一致）。
   超过上限报 `UnsupportedSyntax`。后续由寄存器分配器复用临时值。
-- `for` 循环变量按局部槽处理；当前不支持捕获闭包与 `break`/`continue`。
+- `for` 循环变量按局部槽处理；循环体复用同一帧，因此循环内创建 lambda 会
+  共享最后一次迭代的绑定。第一切片在 lowering 阶段显式拒绝这种写法。
 
 ## 5. 函数与调用
 
 - 顶层函数按源码顺序用 `DEF_FUN` 写入全局；因此在定义前调用与解释器一样
   会失败。
-- 调用目前只接受 `Name` 被调者，先 `LOAD_G` 到基寄存器，再 `CALL`。函数值、
-  lambda 与高阶调用留后续。
+- `CALL` 的被调者是任意表达式：名字、下标、属性或嵌套调用结果都先求值到
+  寄存器，再按 scratch 约定调用。因此函数值、`fs[0](x)`、`f(1)(2)` 与
+  原生高阶助手（如 `map(xs, do: ...)`）共用同一条路径。
+- lambda 降低为独立的 `HirFunction(is_lambda=True)`；显式参数列表与匿名
+  `$0`/`$1` 参数都映射为普通参数槽，定义处生成 `MAKE_CLOSURE`。匿名参数
+  数量由前端记录；第一切片支持位置参数，不支持默认值/变长/块参数。
+- 顶层函数由 `DEF_FUN` 创建，不捕获帧；lambda 由 `MAKE_CLOSURE` 捕获当前帧。
 - 函数体隐式返回最后一个表达式的值；显式 `return` 直接生成 `RET`。
 - 参数/局部变量不可变（与解释器一致）；HIR 第一切片在 lowering 阶段拒绝
   对不可变名的赋值，而不是延迟到 VM。
@@ -94,7 +109,8 @@ HIR 是 AST 与字节码之间的**线性寄存器中间表示**：
 
 - 寄存器编号在 `0..local_count-1`；
 - 跳转目标存在且标签不重复；
-- `DEF_FUN` 的 proto 索引有效；
+- `DEF_FUN`/`MAKE_CLOSURE` 的 proto 索引有效；
+- `LOAD_OUTER`/`STORE_OUTER` 的 `depth >= 1`、`slot` 在 8 位范围；
 - 每个函数的 `local_count` 不超过 256。
 
 测试在 `tests/unit/backend/test_hir.py`，并包含 `format_module` 的人工可读
@@ -112,6 +128,9 @@ dump 用于调试。
 - 下标用 `GET_ITEM`/`SET_ITEM`；切片用 `BUILD_SLICE`（3 位 presence 标志 +
   scratch 寄存器）；属性用 `GET_ATTR`/`SET_ATTR`（名字在常量池，scratch 传
   receiver/value）。当前只覆盖内建容器与内建属性，用户类/模块尚未进入 HIR。
+- 闭包用 `LOAD_OUTER`/`STORE_OUTER`（ABC：depth/slot 各 8 位）与
+  `MAKE_CLOSURE`（ABx：proto 索引）。lambda proto 与顶层函数共用
+  `BytecodeModule.functions`，由 `is_lambda` 仅在 HIR 层区分。
 - HIR `CALL dst callee args...` 使用函数末尾的 scratch 区约定：
   `CALL A B C` 中 `R(A)` 为被调者、`R(A+1..A+C)` 为实参、结果写回 `R(A)`；
   编译器先 MOVE 到 scratch 再回写 dst。`register_count` 包含 scratch，
@@ -126,14 +145,18 @@ dump 用于调试。
 - `runtime/bytecode_vm.py`：Python 调用栈帧、寄存器数组、常量/字节码解码缓存、
   全局名缓存；复用现有 `Environment`、内建环境、类型对象、运算符调度和
   迭代器协议。第一切片现已覆盖集合字面量、内建容器下标/切片与属性读写。
-- 顶层函数由 `DEF_FUN` 创建 `OortVMFunction`；VM 内调用直接进入新帧，内建函数
-  仍走 `call_value`。VM 函数暂不能作为一等值传给 `map` 等原生高阶助手。
+- 每次调用创建带 `parent` 的 `VMFrame`；`OortVMClosure` 保存 proto 与定义帧。
+  顶层函数由 `DEF_FUN` 创建且不捕获帧；lambda 由 `MAKE_CLOSURE` 捕获当前帧。
+  `LOAD_OUTER`/`STORE_OUTER` 沿帧链读写外层寄存器，闭包内的赋值直接修改外层
+  已捕获的寄存器。
+- VM 闭包是一等值：可作为参数/返回值、放入集合、经下标或嵌套调用发起调用；
+  原生高阶助手通过 `interpreter.call_value` 的 `OortVMInvokable` 分支回调 VM。
 - Int 算术/比较和一元运算有快速路径；其余类型回退到解释器的
   `apply_binary`/`apply_unary`，除法零仍产生带位置的 `OortRuntimeError`。
 - `-t vm` 执行当前 HIR 子集；`-t eval` 保持默认，未支持的构造由 HIR 明确拒绝。
 
 ## 9. 下一步
 
-1. 扩大 HIR/VM 子集：函数值/lambda、类/方法、模块与 core 方言。
+1. 扩大 HIR/VM 子集：类/方法、模块与 core 方言。
 2. 对 VM 与解释器做更广的差分/错误路径测试；逐步把 CLI 默认后端切到 VM。
 3. 继续优化：寄存器复用、常量内联、当前帧内联、类型特化；用基准证明。
