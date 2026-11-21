@@ -436,7 +436,11 @@ class BytecodeVM:
             ext_env = env
         else:
             base_env = definition_ext_env if definition_ext_env is not None else env
-            ext_env = Environment(outer=base_env, name="<extensions>")
+            ext_env = (
+                Environment(outer=base_env, name="<extensions>")
+                if proto.defines_extensions
+                else base_env
+            )
         frame = VMFrame(registers, parent_frame, ext_env)
         constants = proto.constants
         instructions = self._decoded(proto)

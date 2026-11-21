@@ -88,6 +88,7 @@ class Proto:
     signature: SignatureSpec = dataclasses.field(default_factory=lambda: SignatureSpec(()))
     local_count: int = 0
     uses_cells: bool = False
+    defines_extensions: bool = False
 
     def line_for(self, pc: int) -> int:
         if 0 <= pc < len(self.line_table):

@@ -120,6 +120,9 @@ class _ProtoCompiler:
         self.fixups: list[_Fixup] = []
         self.scratch_base = function.local_count
         self.uses_cells = any(isinstance(instruction, MakeClosure) for instruction in function.code)
+        self.defines_extensions = any(
+            isinstance(instruction, RegisterExtension) for instruction in function.code
+        )
         self.max_call_slots = max(
             (
                 1
@@ -202,6 +205,7 @@ class _ProtoCompiler:
             signature=self.function.signature,
             local_count=self.function.local_count,
             uses_cells=self.uses_cells,
+            defines_extensions=self.defines_extensions,
         )
 
     def _emit(self, instruction: Instruction) -> None:
