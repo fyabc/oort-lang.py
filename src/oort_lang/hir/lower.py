@@ -15,6 +15,7 @@ from typing import NoReturn
 
 from ..ast import nodes
 from ..diagnostics.syntax_errors import UnsupportedSyntax
+from ..runtime.call_protocol import ParamKind, ParamSpec, SignatureSpec
 from ..source.source_position import SourcePosition
 from .nodes import (
     BinOp,
@@ -60,6 +61,15 @@ from .nodes import (
 )
 
 _MAX_REGISTERS = 256
+
+_PARAM_KINDS = {
+    nodes.ParameterKind.POS_ONLY: ParamKind.POS_ONLY,
+    nodes.ParameterKind.DEFAULT: ParamKind.POS_OR_KW,
+    nodes.ParameterKind.KW_ONLY: ParamKind.KW_ONLY,
+    nodes.ParameterKind.VAR_POS: ParamKind.VAR_POS,
+    nodes.ParameterKind.VAR_KW: ParamKind.VAR_KW,
+    nodes.ParameterKind.BLOCK: ParamKind.BLOCK,
+}
 
 
 @dataclasses.dataclass(slots=True)
@@ -254,17 +264,24 @@ class HirLowerer:
             self._states.pop()
 
     def _lower_function(self, node: nodes.FunctionDef, index: int) -> HirFunction:
+        names, signature = self._lower_signature(node, anonymous=False, start_slot=0)
         state = _FunctionState(name=node.name, code=[], scopes=[{}])
         self._states.append(state)
         try:
-            params = self._lower_parameters(node, anonymous=False)
+            self._declare_signature_params(
+                names,
+                node,
+                anonymous=False,
+                start_slot=0,
+            )
             self._lower_function_body(node)
             result = HirFunction(
                 name=node.name,
-                params=params,
+                params=names,
                 local_count=state.max_reg,
                 code=tuple(state.code),
                 position=node.position,
+                signature=signature,
             )
         finally:
             self._states.pop()
@@ -272,19 +289,31 @@ class HirLowerer:
         return result
 
     def _lower_method(self, node: nodes.FunctionDef, index: int) -> HirFunction:
+        names, signature = self._lower_signature(
+            node,
+            anonymous=False,
+            start_slot=1,
+            has_this=True,
+        )
         state = _FunctionState(name=node.name, code=[], scopes=[{}])
         self._states.append(state)
         try:
             self._declare_local("this", mutable=False, position=node.position)
-            params = self._lower_parameters(node, anonymous=False)
+            self._declare_signature_params(
+                names,
+                node,
+                anonymous=False,
+                start_slot=1,
+            )
             self._lower_function_body(node)
             result = HirFunction(
                 name=node.name,
-                params=("this", *params),
+                params=("this", *names),
                 local_count=state.max_reg,
                 code=tuple(state.code),
                 position=node.position,
                 has_this=True,
+                signature=signature,
             )
         finally:
             self._states.pop()
@@ -328,6 +357,7 @@ class HirLowerer:
                 local_count=state.max_reg,
                 code=tuple(state.code),
                 position=node.position,
+                signature=SignatureSpec(()),
             )
         finally:
             self._states.pop()
@@ -369,6 +399,7 @@ class HirLowerer:
                     local_count=state.max_reg,
                     code=tuple(state.code),
                     position=arm.body.position,
+                    signature=_simple_signature(bindings),
                 )
             finally:
                 self._states.pop()
@@ -386,19 +417,26 @@ class HirLowerer:
             )
         if node.type_params:
             self._reject(node, "generic lambdas")
+        names, signature = self._lower_signature(node, anonymous=True, start_slot=0)
         index = self._reserve_function_index()
         state = _FunctionState(name="<lambda>", code=[], scopes=[{}])
         self._states.append(state)
         try:
-            params = self._lower_parameters(node, anonymous=True)
+            self._declare_signature_params(
+                names,
+                node,
+                anonymous=True,
+                start_slot=0,
+            )
             self._lower_function_body(node)
             result = HirFunction(
                 name="<lambda>",
-                params=params,
+                params=names,
                 local_count=state.max_reg,
                 code=tuple(state.code),
                 position=node.position,
                 is_lambda=True,
+                signature=signature,
             )
         finally:
             self._states.pop()
@@ -407,31 +445,91 @@ class HirLowerer:
         self._emit(MakeClosure(node.position, dst, index))
         return dst
 
-    def _lower_parameters(self, node: nodes.FunctionDef, *, anonymous: bool) -> tuple[str, ...]:
-        params: list[str] = []
-        start_slot = self.state.next_reg
+    def _lower_signature(
+        self,
+        node: nodes.FunctionDef,
+        *,
+        anonymous: bool,
+        start_slot: int,
+        has_this: bool = False,
+    ) -> tuple[tuple[str, ...], SignatureSpec]:
+        names: list[str] = []
+        specs: list[ParamSpec] = []
         if anonymous and not node.has_explicit_param_list:
             for index in range(node.anonymous_count):
                 name = f"${index}"
-                slot = self._declare_local(name, mutable=False, position=node.position)
-                if slot != start_slot + len(params):
-                    self._reject(node, "non-contiguous parameter slots")
-                params.append(name)
-            return tuple(params)
-        for param in node.params:
-            if param.default_value is not None or param.kind not in (
-                nodes.ParameterKind.DEFAULT,
-                nodes.ParameterKind.POS_ONLY,
-            ):
-                self._reject(
-                    param,
-                    "default, keyword-only, variadic or block parameters",
+                names.append(name)
+                specs.append(
+                    ParamSpec(
+                        name=name,
+                        kind=ParamKind.POS_ONLY,
+                        slot=start_slot + index,
+                    )
                 )
-            slot = self._declare_local(param.name, mutable=False, position=param.position)
-            if slot != start_slot + len(params):
-                self._reject(param, "non-contiguous parameter slots")
-            params.append(param.name)
-        return tuple(params)
+            return tuple(names), SignatureSpec(tuple(specs), has_this=has_this)
+
+        for param in node.params:
+            default_index = None
+            if param.default_value is not None:
+                default_index = self._lower_default_proto(
+                    param.name,
+                    tuple(names),
+                    param.default_value,
+                    param.position,
+                )
+            names.append(param.name)
+            specs.append(
+                ParamSpec(
+                    name=param.name,
+                    kind=_PARAM_KINDS[param.kind],
+                    slot=start_slot + len(names) - 1,
+                    has_default=default_index is not None,
+                    default_index=default_index,
+                )
+            )
+        return tuple(names), SignatureSpec(tuple(specs), has_this=has_this)
+
+    def _lower_default_proto(
+        self,
+        name: str,
+        earlier_names: tuple[str, ...],
+        expression: nodes.ASTNode,
+        position: SourcePosition,
+    ) -> int:
+        index = self._reserve_function_index()
+        state = _FunctionState(name=f"<default {name}>", code=[], scopes=[{}])
+        self._states.append(state)
+        try:
+            for earlier in earlier_names:
+                self._declare_local(earlier, mutable=False, position=position)
+            value = self._require_value(expression)
+            self._emit(Return(position, value))
+            result = HirFunction(
+                name=f"<default {name}>",
+                params=earlier_names,
+                local_count=state.max_reg,
+                code=tuple(state.code),
+                position=position,
+                signature=_simple_signature(earlier_names),
+            )
+        finally:
+            self._states.pop()
+        self._function_slots[index] = result
+        return index
+
+    def _declare_signature_params(
+        self,
+        names: tuple[str, ...],
+        node: nodes.FunctionDef,
+        *,
+        anonymous: bool,
+        start_slot: int,
+    ) -> None:
+        for index, name in enumerate(names):
+            position = node.position if anonymous else node.params[index].position
+            slot = self._declare_local(name, mutable=False, position=position)
+            if slot != start_slot + index:
+                self._reject(node, "non-contiguous parameter slots")
 
     def _lower_function_body(self, node: nodes.FunctionDef) -> int:
         last: int | None = None
@@ -775,13 +873,32 @@ class HirLowerer:
         if isinstance(node.func, nodes.Name) and node.func.id == "super":
             self._reject(node, "super calls")
         callee = self._require_value(node.func)
-        args: list[int] = []
+        positional: list[int] = []
+        keywords: list[tuple[str, int]] = []
+        block: int | None = None
         for arg in node.args:
-            if arg.keyword is not None or arg.kind != nodes.ArgumentKind.DEFAULT:
-                self._reject(arg, "keyword, variadic or block arguments")
-            args.append(self._require_value(arg.value))
+            if arg.kind == nodes.ArgumentKind.BLOCK:
+                if block is not None:
+                    self._reject(arg, "multiple trailing blocks")
+                block = self._require_value(arg.value)
+                continue
+            if arg.keyword is not None:
+                keywords.append((arg.keyword, self._require_value(arg.value)))
+                continue
+            if arg.kind != nodes.ArgumentKind.DEFAULT:
+                self._reject(arg, "variadic call arguments")
+            positional.append(self._require_value(arg.value))
         dst = self._alloc(node.position)
-        self._emit(Call(node.position, dst, callee, tuple(args)))
+        self._emit(
+            Call(
+                node.position,
+                dst,
+                callee,
+                tuple(positional),
+                tuple(keywords),
+                block,
+            )
+        )
         return dst
 
     # ------------------------------------------------------------------
@@ -863,6 +980,15 @@ class HirLowerer:
 
 def _is_reserved_method_name(name: str) -> bool:
     return len(name) > 4 and name.startswith("__") and name.endswith("__")
+
+
+def _simple_signature(names: tuple[str, ...]) -> SignatureSpec:
+    return SignatureSpec(
+        tuple(
+            ParamSpec(name=name, kind=ParamKind.POS_ONLY, slot=index)
+            for index, name in enumerate(names)
+        )
+    )
 
 
 def _pattern_bindings(pattern: nodes.Pattern) -> tuple[str, ...]:

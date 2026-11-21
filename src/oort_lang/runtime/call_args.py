@@ -6,6 +6,9 @@ import dataclasses
 from typing import TYPE_CHECKING
 
 from ..ast.nodes.argument import ArgumentKind
+from .call_protocol import ArgumentBindingError
+
+__all__ = ["ArgumentBindingError", "EvaluatedArgument", "normalize_args"]
 
 if TYPE_CHECKING:
     from .objects import OortObject
@@ -18,10 +21,6 @@ class EvaluatedArgument:
     value: "OortObject"
     keyword: str | None = None
     kind: ArgumentKind = ArgumentKind.DEFAULT
-
-
-class ArgumentBindingError(Exception):
-    """Raised when evaluated arguments do not fit a signature."""
 
 
 def normalize_args(args) -> list[EvaluatedArgument]:

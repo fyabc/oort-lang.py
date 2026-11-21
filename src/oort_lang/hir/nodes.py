@@ -11,6 +11,8 @@ from __future__ import annotations
 import dataclasses
 from typing import TYPE_CHECKING
 
+from ..runtime.call_protocol import SignatureSpec
+
 if TYPE_CHECKING:
     from ..source.source_position import SourcePosition
 
@@ -234,6 +236,8 @@ class Call(Instruction):
     dst: int
     callee: int
     args: tuple[int, ...]
+    keywords: tuple[tuple[str, int], ...] = ()
+    block: int | None = None
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -264,6 +268,7 @@ class HirFunction:
     is_main: bool = False
     is_lambda: bool = False
     has_this: bool = False
+    signature: SignatureSpec = dataclasses.field(default_factory=lambda: SignatureSpec(()))
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -319,7 +324,12 @@ def register_reads(instruction: Instruction) -> tuple[int, ...]:
     if isinstance(instruction, SetItem):
         return (instruction.container, instruction.index, instruction.src)
     if isinstance(instruction, Call):
-        return (instruction.callee, *instruction.args)
+        return (
+            instruction.callee,
+            *instruction.args,
+            *(reg for _, reg in instruction.keywords),
+            *((instruction.block,) if instruction.block is not None else ()),
+        )
     if isinstance(instruction, Return):
         return (instruction.src,)
     if isinstance(instruction, OpenIterator):

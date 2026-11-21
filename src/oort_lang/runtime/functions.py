@@ -20,6 +20,7 @@ from .signature import build_call_env
 
 if TYPE_CHECKING:
     from ..ast import nodes
+    from .call_protocol import EvaluatedArg
     from .environment import Environment
     from .type_system import OortType
 
@@ -31,11 +32,6 @@ class OortCallableMixin:
     def get_type_object(cls) -> "OortType":
         return get_runtime().types.for_class(cls)
 
-    @property
-    def arity(self) -> int:
-        """Get arity."""
-        raise NotImplementedError
-
     def __call__(self, interpreter, args):
         raise NotImplementedError
 
@@ -45,6 +41,24 @@ class OortVMInvokable(OortCallableMixin):
 
     def invoke(self, args, position=None):
         raise NotImplementedError
+
+    def invoke_as_method(self, this, args, position=None):
+        raise NotImplementedError
+
+    def invoke_evaluated(
+        self,
+        args: list["EvaluatedArg"],
+        position=None,
+    ):
+        return self.invoke([arg.value for arg in args], position)
+
+    def invoke_evaluated_as_method(
+        self,
+        this,
+        args: list["EvaluatedArg"],
+        position=None,
+    ):
+        return self.invoke_as_method(this, [arg.value for arg in args], position)
 
     def bind(self, this: OortObject) -> "OortVMMethod":
         return OortVMMethod(this, self)
@@ -61,12 +75,17 @@ class OortVMMethod(OortVMInvokable, OortObject):
         self.this = this
         self.target = target
 
-    @property
-    def arity(self) -> int:
-        return self.target.arity
-
     def invoke(self, args, position=None):
-        return self.target.invoke([self.this, *args], position)
+        return self.target.invoke_as_method(self.this, args, position)
+
+    def invoke_as_method(self, this, args, position=None):
+        return self.invoke(args, position)
+
+    def invoke_evaluated(self, args, position=None):
+        return self.target.invoke_evaluated_as_method(self.this, args, position)
+
+    def invoke_evaluated_as_method(self, this, args, position=None):
+        return self.invoke_evaluated(args, position)
 
     def bind(self, this: OortObject) -> "OortVMMethod":
         return self
@@ -154,10 +173,6 @@ class OortFunction(OortFunctionMixin, OortInstance):
     def __repr__(self):
         return f"<Function {self.name} at {hex(id(self))}>"
 
-    @property
-    def arity(self) -> int:
-        return self.node.param_count
-
     def __call__(self, interpreter, args):
         call_env = build_call_env(self.node, interpreter, args, self.closure, self.name)
         try:
@@ -229,10 +244,6 @@ class OortMethod(OortMethodMixin, OortInstance):
     @property
     def is_initializer(self) -> bool:
         return self.name == "__init__"
-
-    @property
-    def arity(self) -> int:
-        return self.node.param_count
 
     def __call__(self, interpreter, args):
         call_env = build_call_env(self.node, interpreter, args, self.closure, self.name)

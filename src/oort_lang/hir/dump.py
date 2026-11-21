@@ -124,8 +124,11 @@ def format_instruction(instruction: Instruction) -> str:
     if isinstance(instruction, SetItem):
         return f"SET_ITEM R{instruction.container}[R{instruction.index}] = R{instruction.src}"
     if isinstance(instruction, Call):
-        args = ", ".join(f"R{arg}" for arg in instruction.args)
-        return f"CALL R{instruction.dst} R{instruction.callee}({args})"
+        args = [f"R{arg}" for arg in instruction.args]
+        args.extend(f"{name}=R{reg}" for name, reg in instruction.keywords)
+        if instruction.block is not None:
+            args.append(f"block=R{instruction.block}")
+        return f"CALL R{instruction.dst} R{instruction.callee}({', '.join(args)})"
     if isinstance(instruction, Return):
         return f"RET R{instruction.src}"
     if isinstance(instruction, OpenIterator):

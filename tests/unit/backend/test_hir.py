@@ -32,6 +32,7 @@ from oort_lang.hir import (
     lower_module,
     validate_module,
 )
+from oort_lang.runtime.call_protocol import ParamKind
 from tests.helpers import build_ast
 
 
@@ -264,6 +265,62 @@ def f(e: E) -> Int {
         )
 
 
+def test_signatures_and_default_protos_lower():
+    module = lower(
+        """def f(a, b = a + 1, /, c = 2, *args, d, e = 3, **kwargs, &block) {
+    a
+}
+"""
+    )
+    function = module.functions[0]
+    assert function.params == ("a", "b", "c", "args", "d", "e", "kwargs", "block")
+    assert [param.kind for param in function.signature.params] == [
+        ParamKind.POS_ONLY,
+        ParamKind.POS_ONLY,
+        ParamKind.POS_OR_KW,
+        ParamKind.VAR_POS,
+        ParamKind.KW_ONLY,
+        ParamKind.KW_ONLY,
+        ParamKind.VAR_KW,
+        ParamKind.BLOCK,
+    ]
+    assert [param.slot for param in function.signature.params] == list(range(8))
+    b_default = function.signature.params[1].default_index
+    c_default = function.signature.params[2].default_index
+    e_default = function.signature.params[5].default_index
+    assert b_default is not None and c_default is not None and e_default is not None
+    assert module.functions[b_default].params == ("a",)
+    assert module.functions[c_default].params == ("a", "b")
+    assert module.functions[e_default].params == ("a", "b", "c", "args", "d")
+
+
+def test_method_signature_starts_after_this():
+    module = lower(
+        """class C {
+    def f(a, b = a + 1) { a + b }
+}
+"""
+    )
+    method = next(function for function in module.functions if function.name == "f")
+    assert method.signature.has_this
+    assert [param.slot for param in method.signature.params] == [1, 2]
+    default_index = method.signature.params[1].default_index
+    assert default_index is not None
+    assert module.functions[default_index].params == ("a",)
+
+
+def test_call_keywords_and_block_lower():
+    module = lower(
+        """def f(a) { a }
+f(1, c = 2) do: 3
+"""
+    )
+    call = next(instruction for instruction in module.main.code if isinstance(instruction, Call))
+    assert call.args
+    assert call.keywords == (("c", call.keywords[0][1]),)
+    assert call.block is not None
+
+
 def test_calls_accept_function_values_and_subscripts():
     module = lower(
         """val f = do(x): x
@@ -313,7 +370,6 @@ print(true or false)
 @pytest.mark.parametrize(
     ("source", "detail"),
     [
-        ("def f(a) { a }\nf(a = 1)\n", "keyword"),
         ("for a, b in [1] { print(a) }\n", "multiple loop"),
         (
             "def f() {\n    def g() { 1 }\n    g()\n}\nf()\n",

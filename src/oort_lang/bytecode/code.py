@@ -4,6 +4,7 @@
 
 import dataclasses
 
+from ..runtime.call_protocol import SignatureSpec
 from ..source.source_position import SourcePosition
 
 
@@ -42,6 +43,15 @@ class EnumSpec:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class CallSpec:
+    """Extended call descriptor: positional count, keyword names and block."""
+
+    positional_count: int
+    keywords: tuple[str, ...] = ()
+    has_block: bool = False
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class ImportSpec:
     """Constant-pool descriptor for one ``IMPORT`` instruction."""
 
@@ -62,6 +72,7 @@ class Proto:
     positions: tuple[SourcePosition, ...]
     scratch_base: int = 0
     has_this: bool = False
+    signature: SignatureSpec = dataclasses.field(default_factory=lambda: SignatureSpec(()))
 
     def line_for(self, pc: int) -> int:
         if 0 <= pc < len(self.line_table):

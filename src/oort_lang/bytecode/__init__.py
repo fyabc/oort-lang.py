@@ -4,6 +4,7 @@
 
 from .code import (
     BytecodeModule,
+    CallSpec,
     ClassSpec,
     EnumSpec,
     ImportSpec,
@@ -30,6 +31,7 @@ __all__ = [
     "BINARY_OPCODES",
     "UNARY_OPCODES",
     "BytecodeModule",
+    "CallSpec",
     "ClassSpec",
     "Decoded",
     "EnumSpec",

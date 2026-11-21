@@ -74,11 +74,6 @@ class FunctionDef(StmtExpr):
         return not self.names
 
     @property
-    def param_count(self) -> int:
-        """Number of call arguments accepted by the function."""
-        return self.anonymous_count if self.anonymous_count else len(self.params)
-
-    @property
     def has_class_prefix(self) -> bool:
         return bool(self.names) and self.names[0] == "class"
 

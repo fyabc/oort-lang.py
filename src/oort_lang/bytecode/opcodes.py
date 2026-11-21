@@ -76,6 +76,7 @@ class Op(IntEnum):
     IMPORT = 63
     BUILD_ENUM = 64
     MATCH = 65
+    CALL_KW = 66
 
     EXTEND = 47
 
@@ -137,6 +138,7 @@ OP_FORMAT: dict[Op, str] = {
     Op.IMPORT: _FORMAT_ABX,
     Op.BUILD_ENUM: _FORMAT_ABX,
     Op.MATCH: _FORMAT_ABX,
+    Op.CALL_KW: _FORMAT_ABX,
     Op.EXTEND: _FORMAT_AX,
 }
 

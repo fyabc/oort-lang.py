@@ -9,13 +9,29 @@ from typing import TYPE_CHECKING
 from ..ast.nodes.argument import ArgumentKind
 from ..ast.nodes.declarations import Parameter, ParameterKind
 from .call_args import ArgumentBindingError, normalize_args
+from .call_protocol import (
+    ArgKind,
+    EvaluatedArg,
+    ParamKind,
+    ParamSpec,
+    SignatureSpec,
+    bind_arguments,
+)
 
 if TYPE_CHECKING:
     from ..ast.nodes.function_def import FunctionDef
-    from .objects import OortObject
 
 
-_NAMED_KINDS = (ParameterKind.POS_ONLY, ParameterKind.DEFAULT, ParameterKind.KW_ONLY)
+_PARAM_KINDS = {
+    ParameterKind.POS_ONLY: ParamKind.POS_ONLY,
+    ParameterKind.DEFAULT: ParamKind.POS_OR_KW,
+    ParameterKind.KW_ONLY: ParamKind.KW_ONLY,
+    ParameterKind.VAR_POS: ParamKind.VAR_POS,
+    ParameterKind.VAR_KW: ParamKind.VAR_KW,
+    ParameterKind.BLOCK: ParamKind.BLOCK,
+}
+
+_NAMED_KINDS = (ParamKind.POS_ONLY, ParamKind.POS_OR_KW, ParamKind.KW_ONLY)
 
 
 class Signature:
@@ -23,28 +39,30 @@ class Signature:
 
     def __init__(self, params: list[Parameter]):
         self.params = list(params)
-        self.positional_only: list[Parameter] = []
-        self.positional_or_keyword: list[Parameter] = []
-        self.var_positional: Parameter | None = None
-        self.keyword_only: list[Parameter] = []
-        self.var_keyword: Parameter | None = None
-        self.block: Parameter | None = None
+        self.spec = SignatureSpec(
+            tuple(
+                ParamSpec(
+                    name=param.name,
+                    kind=_PARAM_KINDS[param.kind],
+                    slot=index,
+                    has_default=param.default_value is not None,
+                )
+                for index, param in enumerate(self.params)
+            )
+        )
+        self._by_name = {param.name: param for param in self.params}
+        self._spec_by_name = {spec.name: spec for spec in self.spec.params}
 
-        for param in self.params:
-            if param.kind == ParameterKind.POS_ONLY:
-                self.positional_only.append(param)
-            elif param.kind == ParameterKind.DEFAULT:
-                self.positional_or_keyword.append(param)
-            elif param.kind == ParameterKind.VAR_POS:
-                self.var_positional = param
-            elif param.kind == ParameterKind.KW_ONLY:
-                self.keyword_only.append(param)
-            elif param.kind == ParameterKind.VAR_KW:
-                self.var_keyword = param
-            elif param.kind == ParameterKind.BLOCK:
-                self.block = param
-            else:
-                raise ValueError(f"Invalid parameter kind {param.kind}")
+    def _params_for(self, specs: list[ParamSpec]) -> list[Parameter]:
+        return [self._by_name[spec.name] for spec in specs]
+
+    @property
+    def positional_only(self) -> list[Parameter]:
+        return self._params_for(self.spec.positional_only)
+
+    @property
+    def positional_or_keyword(self) -> list[Parameter]:
+        return self._params_for(self.spec.positional_or_keyword)
 
     @property
     def positional_params(self) -> list[Parameter]:
@@ -52,26 +70,14 @@ class Signature:
 
     @property
     def ordered_params(self) -> list[Parameter]:
-        result = [*self.positional_only, *self.positional_or_keyword]
-        if self.var_positional is not None:
-            result.append(self.var_positional)
-        result.extend(self.keyword_only)
-        if self.var_keyword is not None:
-            result.append(self.var_keyword)
-        if self.block is not None:
-            result.append(self.block)
-        return result
+        return self._params_for(self.spec.ordered_params)
 
     def positional_only_names(self) -> set[str]:
         return {param.name for param in self.positional_only}
 
     def keyword_target(self, name: str) -> Parameter | None:
-        for param in (*self.positional_or_keyword, *self.keyword_only):
-            if param.name == name:
-                return param
-        if self.block is not None and self.block.name == name:
-            return self.block
-        return None
+        target = self.spec.keyword_target(name)
+        return None if target is None else self._by_name[target.name]
 
     def bind(self, interpreter, args, closure, name: str):
         """Bind evaluated arguments and return the call environment."""
@@ -79,95 +85,26 @@ class Signature:
         from .objects import OortDict, OortNull, OortString, OortTuple
 
         args = normalize_args(args)
-
-        provided: dict[str, OortObject] = {}
-        extra_pos: list[OortObject] = []
-        extra_kw: dict[str, OortObject] = {}
-        block: OortObject | None = None
-        seen_keyword = False
-        positional_count = 0
-        pos_params = self.positional_params
-        pos_index = 0
-
-        for arg in args:
-            if arg.kind == ArgumentKind.BLOCK and self.block is not None:
-                if block is not None:
-                    raise ArgumentBindingError(
-                        f"{name}() got multiple values for argument {self.block.name!r}"
-                    )
-                block = arg.value
-                continue
-
-            if arg.keyword is None:
-                # A trailing block is syntactic sugar for the last positional
-                # argument; it may follow keyword arguments when the callee has
-                # no `&block` parameter, and it skips slots already filled by
-                # keyword arguments.
-                block_positional = arg.kind == ArgumentKind.BLOCK
-                if seen_keyword and not block_positional:
-                    raise ArgumentBindingError(
-                        f"{name}(): positional argument follows keyword argument"
-                    )
-                positional_count += 1
-                if block_positional:
-                    while pos_index < len(pos_params) and pos_params[pos_index].name in provided:
-                        pos_index += 1
-                if pos_index < len(pos_params):
-                    provided[pos_params[pos_index].name] = arg.value
-                    pos_index += 1
-                elif self.var_positional is not None:
-                    extra_pos.append(arg.value)
-                else:
-                    raise ArgumentBindingError(
-                        f"{name}() takes {len(pos_params)} positional arguments "
-                        f"but {positional_count} were given"
-                    )
-                continue
-
-            seen_keyword = True
-            if arg.keyword in extra_kw:
-                raise ArgumentBindingError(
-                    f"{name}() got multiple values for argument {arg.keyword!r}"
-                )
-
-            if arg.keyword in self.positional_only_names():
-                if self.var_keyword is not None:
-                    extra_kw[arg.keyword] = arg.value
-                    continue
-                raise ArgumentBindingError(f"{name}() argument {arg.keyword!r} is positional-only")
-
-            param = self.keyword_target(arg.keyword)
-            if param is None:
-                if self.var_keyword is not None:
-                    extra_kw[arg.keyword] = arg.value
-                    continue
-                raise ArgumentBindingError(
-                    f"{name}() got an unexpected keyword argument {arg.keyword!r}"
-                )
-            if arg.keyword in provided:
-                raise ArgumentBindingError(
-                    f"{name}() got multiple values for argument {arg.keyword!r}"
-                )
-            provided[param.name] = arg.value
-
-        missing = [
-            param.name
-            for param in self.ordered_params
-            if param.kind in _NAMED_KINDS
-            and param.name not in provided
-            and param.default_value is None
+        shared = [
+            EvaluatedArg(
+                arg.value,
+                ArgKind.BLOCK
+                if arg.kind == ArgumentKind.BLOCK
+                else ArgKind.KEYWORD
+                if arg.keyword is not None
+                else ArgKind.POSITIONAL,
+                arg.keyword,
+            )
+            for arg in args
         ]
-        if missing:
-            if len(missing) == 1:
-                raise ArgumentBindingError(f"{name}() missing required argument {missing[0]!r}")
-            joined = ", ".join(repr(item) for item in missing)
-            raise ArgumentBindingError(f"{name}() missing required arguments: {joined}")
+        plan = bind_arguments(self.spec, shared, name)
 
         env = Environment(outer=closure, name=name)
         for param in self.ordered_params:
-            if param.kind in _NAMED_KINDS:
-                if param.name in provided:
-                    value = provided[param.name]
+            param_spec = self._spec_by_name[param.name]
+            if param_spec.kind in _NAMED_KINDS:
+                if param.name in plan.provided:
+                    value = plan.provided[param.name]
                 else:
                     assert param.default_value is not None
                     previous_env = interpreter.env
@@ -176,21 +113,17 @@ class Signature:
                         value = param.default_value.accept(interpreter)
                     finally:
                         interpreter.env = previous_env
-            elif param.kind == ParameterKind.VAR_POS:
-                value = OortTuple(tuple(extra_pos))
-            elif param.kind == ParameterKind.VAR_KW:
-                value = OortDict({OortString(key): item for key, item in extra_kw.items()})
-            elif param.kind == ParameterKind.BLOCK:
-                if param.name in provided:
-                    if block is not None:
-                        raise ArgumentBindingError(
-                            f"{name}() got multiple values for argument {param.name!r}"
-                        )
-                    value = provided[param.name]
+            elif param_spec.kind is ParamKind.VAR_POS:
+                value = OortTuple(tuple(plan.extra_pos))
+            elif param_spec.kind is ParamKind.VAR_KW:
+                value = OortDict({OortString(key): item for key, item in plan.extra_kw.items()})
+            elif param_spec.kind is ParamKind.BLOCK:
+                if param.name in plan.provided:
+                    value = plan.provided[param.name]
                 else:
-                    value = block if block is not None else OortNull.get_null_value()
+                    value = plan.block if plan.block is not None else OortNull.get_null_value()
             else:
-                raise AssertionError(f"Unexpected parameter kind {param.kind}")
+                raise AssertionError(f"Unexpected parameter kind {param_spec.kind}")
 
             env.define(param.name, value)
 

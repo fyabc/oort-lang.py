@@ -48,6 +48,7 @@ from ..hir.nodes import (
 from ..source.source_position import SourcePosition
 from .code import (
     BytecodeModule,
+    CallSpec,
     ClassSpec,
     EnumSpec,
     ImportSpec,
@@ -113,13 +114,16 @@ class _ProtoCompiler:
         self.labels: dict[str, int] = {}
         self.fixups: list[_Fixup] = []
         self.scratch_base = function.local_count
-        self.max_args = max(
+        self.max_call_slots = max(
             (
-                len(instruction.args)
+                1
+                + len(instruction.args)
+                + len(instruction.keywords)
+                + (1 if instruction.block is not None else 0)
                 for instruction in function.code
                 if isinstance(instruction, Call)
             ),
-            default=-1,
+            default=0,
         )
         self.has_iterator = any(
             isinstance(instruction, IteratorNext) for instruction in function.code
@@ -158,7 +162,7 @@ class _ProtoCompiler:
             default=0,
         )
         self.scratch = max(
-            self.max_args + 1,
+            self.max_call_slots,
             1 if self.has_iterator else 0,
             1 if has_build else 0,
             3 if has_slice else 0,
@@ -189,6 +193,7 @@ class _ProtoCompiler:
             positions=tuple(self.positions),
             scratch_base=self.scratch_base,
             has_this=self.function.has_this,
+            signature=self.function.signature,
         )
 
     def _emit(self, instruction: Instruction) -> None:
@@ -474,7 +479,25 @@ class _ProtoCompiler:
         self._word(encode_abc(Op.MOVE, base, instruction.callee, 0), position)
         for index, arg in enumerate(instruction.args):
             self._word(encode_abc(Op.MOVE, base + 1 + index, arg, 0), position)
-        self._word(encode_abc(Op.CALL, base, 0, nargs), position)
+        if not instruction.keywords and instruction.block is None:
+            self._word(encode_abc(Op.CALL, base, 0, nargs), position)
+            self._word(encode_abc(Op.MOVE, instruction.dst, base, 0), position)
+            return
+        kw_base = base + 1 + nargs
+        for index, (_, value) in enumerate(instruction.keywords):
+            self._word(encode_abc(Op.MOVE, kw_base + index, value, 0), position)
+        if instruction.block is not None:
+            self._word(
+                encode_abc(Op.MOVE, kw_base + len(instruction.keywords), instruction.block, 0),
+                position,
+            )
+        call_spec = CallSpec(
+            positional_count=nargs,
+            keywords=tuple(name for name, _ in instruction.keywords),
+            has_block=instruction.block is not None,
+        )
+        bx = self._constant(call_spec, position)
+        self._word(encode_abx(Op.CALL_KW, base, bx), position)
         self._word(encode_abc(Op.MOVE, instruction.dst, base, 0), position)
 
     def _emit_jump(

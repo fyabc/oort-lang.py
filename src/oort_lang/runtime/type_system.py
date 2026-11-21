@@ -145,15 +145,6 @@ class OortType(OortInstance, OortCallableMixin):
         else:
             self.type.set(name, value)
 
-    @property
-    def arity(self) -> int:
-        init_func = self.get("__init__")
-        if init_func is None:
-            return 0
-        if not isinstance(init_func, OortCallableMixin):
-            raise TypeError(f"{self.name}.__init__ is not callable")
-        return init_func.arity
-
     def __call__(self, interpreter, args):
         instance = OortInstance(type_=self)
 

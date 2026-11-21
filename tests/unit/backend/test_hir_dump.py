@@ -109,6 +109,10 @@ def test_every_instruction_has_a_readable_dump():
         (GetItem(p, 0, 1, 2), "GET_ITEM R0 R1[R2]"),
         (SetItem(p, 1, 2, 0), "SET_ITEM R1[R2] = R0"),
         (Call(p, 0, 1, (2, 3)), "CALL R0 R1(R2, R3)"),
+        (
+            Call(p, 0, 1, (2,), (("k", 3),), 4),
+            "CALL R0 R1(R2, k=R3, block=R4)",
+        ),
         (Return(p, 0), "RET R0"),
         (OpenIterator(p, 0, 1), "OPEN_ITER R0 R1"),
         (IteratorNext(p, 0, 1, "done"), "ITER_NEXT R0 R1 -> done"),

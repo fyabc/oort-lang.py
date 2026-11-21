@@ -221,6 +221,37 @@ var early = while true { break 5 }
 print(early)
 """,
     """\
+def f(a, b = a + 1, /, c = 2, *args, d, e = 3, **kwargs) {
+    print(a, b, c, args, d, e, kwargs)
+}
+f(1, d = 4)
+f(1, 2, 3, 4, 5, d = 6, e = 7, x = 8)
+
+var count = 0
+def next() {
+    count = count + 1
+    count
+}
+def defaults(x = next()) { x }
+print(defaults(), defaults())
+
+def with_block(&block) {
+    if block is null { print("none") } else { print(block()) }
+}
+with_block() do: 1
+with_block(block = do: 2)
+with_block()
+
+class C {
+    def __init__(a, b = 10) { this.a = a; this.b = b }
+    def sum(extra = 0) { this.a + this.b + extra }
+}
+val c = C(1)
+print(c.sum(), c.sum(5), c.sum(extra = 7))
+val d1 = C(a = 2, b = 3)
+print(d1.sum())
+""",
+    """\
 class Countdown {
     def __init__(n) { this.n = n }
     def __iter__() { do: this.step() }
@@ -402,6 +433,35 @@ f(A)
     assert "return inside a match arm" in caplog.text
 
 
+@pytest.mark.parametrize(
+    ("source", "detail"),
+    [
+        ("def f(a, b) { a }\nf(1)\n", "missing required argument 'b'"),
+        ("def f(a) { a }\nf(1, a = 2)\n", "got multiple values"),
+        ("def f(a, /) { a }\nf(a = 1)\n", "positional-only"),
+        ("def f(*, a) { a }\nf()\n", "missing required argument 'a'"),
+        ("def f(a) { a }\nf(b = 1)\n", "unexpected keyword argument 'b'"),
+        ("print(value = 1)\n", "does not accept keyword arguments"),
+    ],
+)
+def test_vm_reports_binding_errors(
+    source: str,
+    detail: str,
+    caplog: pytest.LogCaptureFixture,
+):
+    compiler = get_compiler(["NOT_EXIST", "-t", "vm"])
+    with pytest.raises(CompilerError):
+        compiler.run_string(source)
+    assert detail in caplog.text
+
+
+def test_vm_reports_duplicate_block(caplog: pytest.LogCaptureFixture):
+    compiler = get_compiler(["NOT_EXIST", "-t", "vm"])
+    with pytest.raises(CompilerError):
+        compiler.run_string("def f(&block) { 1 }\nf(block = do: 1) do: 2\n")
+    assert "got multiple values" in caplog.text
+
+
 def test_vm_reports_closure_errors(caplog: pytest.LogCaptureFixture):
     compiler = get_compiler(["NOT_EXIST", "-t", "vm"])
     with pytest.raises(CompilerError):
@@ -411,7 +471,7 @@ def test_vm_reports_closure_errors(caplog: pytest.LogCaptureFixture):
     compiler = get_compiler(["NOT_EXIST", "-t", "vm"])
     with pytest.raises(CompilerError):
         compiler.run_string("val f = do(x): x\nf()\n")
-    assert "expects 1 arguments" in caplog.text
+    assert "missing required argument 'x'" in caplog.text
 
 
 def test_vm_returns_last_value():
@@ -429,7 +489,7 @@ def test_vm_reports_function_arity(caplog: pytest.LogCaptureFixture):
     compiler = get_compiler(["NOT_EXIST", "-t", "vm"])
     with pytest.raises(CompilerError):
         compiler.run_string("def f(a) { a }\nf()\n")
-    assert "expects 1 arguments" in caplog.text
+    assert "missing required argument 'a'" in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -460,7 +520,7 @@ def test_vm_reports_class_errors(caplog: pytest.LogCaptureFixture):
     compiler = get_compiler(["NOT_EXIST", "-t", "vm"])
     with pytest.raises(CompilerError):
         compiler.run_string("class C { def __init__(x) { this.x = x } }\nC()\n")
-    assert "expects 2 arguments" in caplog.text
+    assert "missing required argument 'x'" in caplog.text
 
     compiler = get_compiler(["NOT_EXIST", "-t", "vm"])
     with pytest.raises(CompilerError):

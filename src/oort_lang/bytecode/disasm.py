@@ -4,6 +4,7 @@
 
 from .code import (
     BytecodeModule,
+    CallSpec,
     ClassSpec,
     EnumSpec,
     ImportSpec,
@@ -115,6 +116,13 @@ def _format(proto: Proto, pc: int, decoded: Decoded) -> str:
         return f"JUMP_TRUE R{decoded.a} {pc + 1 + decoded.sbx}"
     if op is Op.CALL:
         return f"CALL R{decoded.a} nargs={decoded.c}"
+    if op is Op.CALL_KW:
+        spec = proto.constants[decoded.bx] if 0 <= decoded.bx < len(proto.constants) else None
+        if isinstance(spec, CallSpec):
+            keywords = ", ".join(spec.keywords)
+            block = " block" if spec.has_block else ""
+            return f"CALL_KW R{decoded.a} pos={spec.positional_count} kws=({keywords}){block}"
+        return f"CALL_KW R{decoded.a} <bad spec>"
     if op is Op.RET:
         return f"RET R{decoded.a}"
     if op is Op.OPEN_ITER:

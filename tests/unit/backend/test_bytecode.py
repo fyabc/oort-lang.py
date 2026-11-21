@@ -5,6 +5,7 @@
 import pytest
 
 from oort_lang.bytecode import (
+    CallSpec,
     ClassSpec,
     EnumSpec,
     ImportSpec,
@@ -217,6 +218,23 @@ print(area(Circle(2)))
     text = disassemble_module(module)
     assert "BUILD_ENUM R" in text
     assert "MATCH R" in text
+
+
+def test_keyword_calls_compile_to_call_kw():
+    module = compile_source(
+        """def f(a, b = 1, *, c = 2) { a + b + c }
+print(f(1, c = 3))
+"""
+    )
+    ops = {decode(word).op for word in module.main.code}
+    assert Op.CALL_KW in ops
+    spec = next(value for value in module.main.constants if isinstance(value, CallSpec))
+    assert spec.positional_count == 1
+    assert spec.keywords == ("c",)
+    assert not spec.has_block
+    text = disassemble_module(module)
+    assert "CALL_KW R" in text
+    assert "kws=(c)" in text
 
 
 def test_imports_compile_to_import_opcodes():
