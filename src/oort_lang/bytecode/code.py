@@ -8,6 +8,15 @@ from ..source.source_position import SourcePosition
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class ClassSpec:
+    """Constant-pool descriptor for one ``BUILD_CLASS`` instruction."""
+
+    name: str
+    base_count: int
+    methods: tuple[tuple[str, int], ...]
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class Proto:
     name: str
     params: tuple[str, ...]
@@ -16,6 +25,8 @@ class Proto:
     constants: tuple[object, ...]
     line_table: tuple[int, ...]
     positions: tuple[SourcePosition, ...]
+    scratch_base: int = 0
+    has_this: bool = False
 
     def line_for(self, pc: int) -> int:
         if 0 <= pc < len(self.line_table):

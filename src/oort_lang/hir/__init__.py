@@ -6,6 +6,7 @@ from .dump import format_function, format_instruction, format_module
 from .lower import HirLowerer, lower_module
 from .nodes import (
     BinOp,
+    BuildClass,
     BuildDict,
     BuildList,
     BuildSet,
@@ -42,6 +43,7 @@ from .nodes import (
 
 __all__ = [
     "BinOp",
+    "BuildClass",
     "BuildDict",
     "BuildList",
     "BuildSet",

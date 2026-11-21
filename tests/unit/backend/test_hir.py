@@ -6,6 +6,7 @@ import pytest
 
 from oort_lang.diagnostics.syntax_errors import UnsupportedSyntax
 from oort_lang.hir import (
+    BuildClass,
     BuildDict,
     BuildList,
     BuildSlice,
@@ -154,6 +155,38 @@ print(f(2))
     assert any(isinstance(i, StoreOuter) for i in closure.code)
 
 
+def test_classes_lower_methods_with_this():
+    module = lower(
+        """class C {
+    def __init__(n) { this.n = n }
+    def get() { this.n }
+}
+val c = C(1)
+print(c.get())
+"""
+    )
+    build = next(i for i in module.main.code if isinstance(i, BuildClass))
+    assert build.name == "C"
+    assert [name for name, _ in build.methods] == ["__init__", "get"]
+    methods = [module.functions[index] for _, index in build.methods]
+    assert [method.name for method in methods] == ["__init__", "get"]
+    assert all(method.has_this for method in methods)
+    assert methods[0].params == ("this", "n")
+    assert methods[1].params == ("this",)
+
+
+def test_class_bases_lower_to_registers():
+    module = lower(
+        """class Base { def value() { 1 } }
+class Derived < Base { def value() { 2 } }
+print(Derived().value())
+"""
+    )
+    builds = [i for i in module.main.code if isinstance(i, BuildClass)]
+    assert builds[0].bases == ()
+    assert len(builds[1].bases) == 1
+
+
 def test_calls_accept_function_values_and_subscripts():
     module = lower(
         """val f = do(x): x
@@ -177,7 +210,7 @@ print(true or false)
 @pytest.mark.parametrize(
     ("source", "detail"),
     [
-        ("class C {}\n", "ClassDef"),
+        ("while true { break }\n", "break/continue"),
         ("def f(a) { a }\nf(a = 1)\n", "keyword"),
         ("for a, b in [1] { print(a) }\n", "multiple loop"),
         (
@@ -189,6 +222,21 @@ print(true or false)
     ],
 )
 def test_unsupported_nodes_are_rejected(source: str, detail: str):
+    with pytest.raises(UnsupportedSyntax, match=detail):
+        lower_module(build_ast(source))
+
+
+@pytest.mark.parametrize(
+    ("source", "detail"),
+    [
+        ("class C { print(1) }\n", "class-body"),
+        ("def f() { class C {} }\nf()\n", "nested class"),
+        ("class C { def class.f: 1 }\n", "class methods"),
+        ("class C { def __str__: 1 }\n", "special method"),
+        ("class A { def f: 1 }\nclass C < A { def f: super.f() }\n", "ImplicitSuperExpr"),
+    ],
+)
+def test_unsupported_class_forms_are_rejected(source: str, detail: str):
     with pytest.raises(UnsupportedSyntax, match=detail):
         lower_module(build_ast(source))
 

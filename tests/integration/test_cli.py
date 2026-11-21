@@ -64,8 +64,8 @@ print(f(2))
 
 
 def test_bytecode_target_rejects_unsupported_syntax(monkeypatch, caplog):
-    assert _run_cli(monkeypatch, ["-t", "bc", "-c", "class C {}\n"]) != 0
-    assert "HIR backend does not support ClassDef" in caplog.text
+    assert _run_cli(monkeypatch, ["-t", "bc", "-c", "while true { break }\n"]) != 0
+    assert "HIR backend does not support break/continue" in caplog.text
 
 
 def test_print_ast_with_metadata(monkeypatch, capsys):

@@ -4,7 +4,13 @@
 
 from typing import TYPE_CHECKING
 
-from .functions import OortFunction, OortMethod, OortNativeFunction, OortNativeMethod
+from .functions import (
+    OortFunction,
+    OortMethod,
+    OortNativeFunction,
+    OortNativeMethod,
+    OortVMInvokable,
+)
 from .type_system import OortType
 
 if TYPE_CHECKING:
@@ -30,6 +36,8 @@ def _get_operator_from_cls(
                 )
             elif isinstance(value, OortNativeFunction):
                 return OortNativeMethod.from_native_func(this=receiver, func=value)
+            elif isinstance(value, OortVMInvokable):
+                return value.bind(receiver)
             else:
                 return value
     return None
@@ -65,6 +73,8 @@ def _get_from_cls(name: str, start_type: "OortType", receiver: "OortObject") -> 
                 )
             elif isinstance(value, OortNativeFunction):
                 return OortNativeMethod.from_native_func(this=receiver, func=value)
+            elif isinstance(value, OortVMInvokable):
+                return value.bind(receiver)
             else:
                 return value
 
@@ -81,13 +91,21 @@ def _get_from_cls(name: str, start_type: "OortType", receiver: "OortObject") -> 
                     return OortMethod(this=receiver.type, node=value.node, closure=value.closure)
                 elif isinstance(value, OortNativeFunction):
                     return OortNativeMethod.from_native_func(this=receiver.type, func=value)
+                elif isinstance(value, OortVMInvokable):
+                    return value.bind(receiver.type)
                 else:
                     return value
 
     return None
 
 
-_CALLABLE_CLASS_MEMBERS = (OortFunction, OortNativeFunction, OortMethod, OortNativeMethod)
+_CALLABLE_CLASS_MEMBERS = (
+    OortFunction,
+    OortNativeFunction,
+    OortMethod,
+    OortNativeMethod,
+    OortVMInvokable,
+)
 
 
 def find_callable_class_member(name: str, start_type: "OortType") -> "OortObject | None":

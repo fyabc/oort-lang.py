@@ -149,6 +149,24 @@ print(make(1)(2))
     assert "LOAD_OUTER" in text
 
 
+def test_classes_compile_to_build_class():
+    module = compile_source(
+        """class C {
+    def __init__(n) { this.n = n }
+}
+print(C(1).n)
+"""
+    )
+    ops = {decode(word).op for word in module.main.code}
+    assert Op.BUILD_CLASS in ops
+    method = module.functions[0]
+    assert method.has_this
+    assert method.params == ("this", "n")
+    text = disassemble_module(module)
+    assert "BUILD_CLASS R" in text
+    assert "C bases=0" in text
+
+
 def test_disassembly_mentions_protos_and_calls():
     text = disassemble_module(compile_source("def f(a) { a }\nprint(f(1))\n"))
     assert "Proto <main>" in text

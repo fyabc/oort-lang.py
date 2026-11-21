@@ -3,9 +3,9 @@
 """Lower the checked dynamic AST into the shared low-level HIR.
 
 This slice covers arithmetic, locals, globals, branches, loops, calls,
-top-level functions, lambdas/closures and first-class function values. Anything
-else is rejected explicitly (OP 0004: never rely on a visitor's default
-traversal).
+top-level functions, lambdas/closures, first-class function values and dynamic
+classes/methods. Anything else is rejected explicitly (OP 0004: never rely on a
+visitor's default traversal).
 """
 
 import dataclasses
@@ -17,6 +17,7 @@ from ..diagnostics.syntax_errors import UnsupportedSyntax
 from ..source.source_position import SourcePosition
 from .nodes import (
     BinOp,
+    BuildClass,
     BuildDict,
     BuildList,
     BuildSet,
@@ -88,15 +89,28 @@ class HirLowerer:
         self.module = module
         statements = list(module.body.statements)
         function_defs: dict[int, int] = {}
+        class_methods: dict[int, tuple[tuple[nodes.FunctionDef, int], ...]] = {}
         for stmt in statements:
             if isinstance(stmt, nodes.FunctionDef) and not stmt.is_lambda:
                 self._validate_top_level_function(stmt)
                 function_defs[id(stmt)] = self._reserve_function_index()
+            elif isinstance(stmt, nodes.ClassDef):
+                methods: list[tuple[nodes.FunctionDef, int]] = []
+                self._validate_top_level_class(stmt)
+                for member in stmt.body.statements:
+                    if not isinstance(member, nodes.FunctionDef) or member.is_lambda:
+                        self._reject(member, "class-body statements other than methods")
+                    self._validate_class_method(member)
+                    methods.append((member, self._reserve_function_index()))
+                class_methods[id(stmt)] = tuple(methods)
 
-        main = self._lower_main(statements, function_defs)
+        main = self._lower_main(statements, function_defs, class_methods)
         for stmt in statements:
             if isinstance(stmt, nodes.FunctionDef) and not stmt.is_lambda:
                 self._lower_function(stmt, function_defs[id(stmt)])
+            elif isinstance(stmt, nodes.ClassDef):
+                for method, index in class_methods[id(stmt)]:
+                    self._lower_method(method, index)
         functions = tuple(self._function_slots[index] for index in range(self._next_function_index))
         result = HirModule(main=main, functions=functions)
         validate_module(result)
@@ -111,6 +125,28 @@ class HirLowerer:
         self._next_function_index += 1
         return index
 
+    def _validate_top_level_class(self, node: nodes.ClassDef) -> None:
+        if len(node.names) != 1:
+            self._reject(node, "namespaced or anonymous classes")
+        if node.type_params:
+            self._reject(node, "generic classes")
+        if node.meta is not None:
+            self._reject(node, "metaclasses")
+
+    def _validate_class_method(self, node: nodes.FunctionDef) -> None:
+        if node.is_class_method:
+            self._reject(node, "class methods")
+        if node.is_extension:
+            self._reject(node, "extension methods in class bodies")
+        if len(node.names) != 1:
+            self._reject(node, "namespaced methods")
+        if node.type_params:
+            self._reject(node, "generic methods")
+        if node.operator_symbol is not None:
+            self._reject(node, "operator methods")
+        if _is_reserved_method_name(node.name) and node.name not in ("__init__", "__iter__"):
+            self._reject(node, f"special method {node.name!r}")
+
     def _validate_top_level_function(self, node: nodes.FunctionDef) -> None:
         if node.is_extension:
             self._reject(node, "extension methods")
@@ -124,7 +160,10 @@ class HirLowerer:
             self._reject(node, "namespaced functions")
 
     def _lower_main(
-        self, statements: list[nodes.ASTNode], function_defs: dict[int, int]
+        self,
+        statements: list[nodes.ASTNode],
+        function_defs: dict[int, int],
+        class_methods: dict[int, tuple[tuple[nodes.FunctionDef, int], ...]],
     ) -> HirFunction:
         state = _FunctionState(name="<main>", code=[], scopes=[{}], is_main=True)
         self._states.append(state)
@@ -137,6 +176,10 @@ class HirLowerer:
                     index = function_defs[id(stmt)]
                     self._emit(DefineFunction(stmt.position, name, index))
                     self._global_mutability[name] = False
+                    last = None
+                    continue
+                if isinstance(stmt, nodes.ClassDef):
+                    self._lower_class_def(stmt, class_methods[id(stmt)])
                     last = None
                     continue
                 last = self._lower_stmt(stmt)
@@ -172,6 +215,45 @@ class HirLowerer:
         self._function_slots[index] = result
         return result
 
+    def _lower_method(self, node: nodes.FunctionDef, index: int) -> HirFunction:
+        state = _FunctionState(name=node.name, code=[], scopes=[{}])
+        self._states.append(state)
+        try:
+            self._declare_local("this", mutable=False, position=node.position)
+            params = self._lower_parameters(node, anonymous=False)
+            self._lower_function_body(node)
+            result = HirFunction(
+                name=node.name,
+                params=("this", *params),
+                local_count=state.max_reg,
+                code=tuple(state.code),
+                position=node.position,
+                has_this=True,
+            )
+        finally:
+            self._states.pop()
+        self._function_slots[index] = result
+        return result
+
+    def _lower_class_def(
+        self,
+        node: nodes.ClassDef,
+        methods: tuple[tuple[nodes.FunctionDef, int], ...],
+    ) -> None:
+        bases = tuple(self._require_value(base) for base in node.bases)
+        dst = self._alloc(node.position)
+        self._emit(
+            BuildClass(
+                node.position,
+                dst,
+                node.name,
+                bases,
+                tuple((method.name, index) for method, index in methods),
+            )
+        )
+        self._emit(StoreGlobal(node.name_position, node.name, dst))
+        self._global_mutability[node.name] = False
+
     def _lower_lambda(self, node: nodes.FunctionDef) -> int:
         if self.state.loop_depth:
             self._reject(
@@ -203,13 +285,14 @@ class HirLowerer:
 
     def _lower_parameters(self, node: nodes.FunctionDef, *, anonymous: bool) -> tuple[str, ...]:
         params: list[str] = []
+        start_slot = self.state.next_reg
         if anonymous and not node.has_explicit_param_list:
             for index in range(node.anonymous_count):
                 name = f"${index}"
                 slot = self._declare_local(name, mutable=False, position=node.position)
-                params.append(name)
-                if slot != len(params) - 1:
+                if slot != start_slot + len(params):
                     self._reject(node, "non-contiguous parameter slots")
+                params.append(name)
             return tuple(params)
         for param in node.params:
             if param.default_value is not None or param.kind not in (
@@ -221,9 +304,9 @@ class HirLowerer:
                     "default, keyword-only, variadic or block parameters",
                 )
             slot = self._declare_local(param.name, mutable=False, position=param.position)
-            params.append(param.name)
-            if slot != len(params) - 1:
+            if slot != start_slot + len(params):
                 self._reject(param, "non-contiguous parameter slots")
+            params.append(param.name)
         return tuple(params)
 
     def _lower_function_body(self, node: nodes.FunctionDef) -> int:
@@ -254,7 +337,9 @@ class HirLowerer:
             return None
         if isinstance(node, (nodes.ImportStmt, nodes.ImportFromStmt)):
             self._reject(node, "imports")
-        if isinstance(node, (nodes.ClassDef, nodes.EnumDef, nodes.MatchExpr)):
+        if isinstance(node, nodes.ClassDef):
+            self._reject(node, "nested class definitions")
+        if isinstance(node, (nodes.EnumDef, nodes.MatchExpr)):
             self._reject(node, type(node).__name__)
         if isinstance(node, (nodes.BreakExpr, nodes.ContinueExpr)):
             self._reject(node, "break/continue")
@@ -339,6 +424,8 @@ class HirLowerer:
             self._reject(node, "ellipsis")
         if isinstance(node, nodes.Name):
             return self._lower_name(node)
+        if isinstance(node, nodes.ClassDef):
+            self._reject(node, "class expressions")
         if isinstance(node, nodes.UnaryExpr):
             operand = self._require_value(node.operand)
             dst = self._alloc(node.position)
@@ -527,6 +614,8 @@ class HirLowerer:
     def _lower_call(self, node: nodes.Call) -> int:
         if node.infix:
             self._reject(node, "infix calls")
+        if isinstance(node.func, nodes.Name) and node.func.id == "super":
+            self._reject(node, "super calls")
         callee = self._require_value(node.func)
         args: list[int] = []
         for arg in node.args:
@@ -612,6 +701,10 @@ class HirLowerer:
     @staticmethod
     def _reject_position(position: SourcePosition, message: str) -> NoReturn:
         raise UnsupportedSyntax(message + ".", position)
+
+
+def _is_reserved_method_name(name: str) -> bool:
+    return len(name) > 4 and name.startswith("__") and name.endswith("__")
 
 
 def module_position(statements: Iterable[nodes.ASTNode]) -> SourcePosition:

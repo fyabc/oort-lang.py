@@ -2,7 +2,7 @@
 
 """Disassemble bytecode protos to a stable human-readable form."""
 
-from .code import BytecodeModule, Proto
+from .code import BytecodeModule, ClassSpec, Proto
 from .opcodes import Decoded, Op, decode
 
 
@@ -28,6 +28,12 @@ def _format(proto: Proto, pc: int, decoded: Decoded) -> str:
         return f"DEF_FUN proto[{decoded.bx}]"
     if op is Op.MAKE_CLOSURE:
         return f"MAKE_CLOSURE R{decoded.a} proto[{decoded.bx}]"
+    if op is Op.BUILD_CLASS:
+        spec = proto.constants[decoded.bx] if 0 <= decoded.bx < len(proto.constants) else None
+        if isinstance(spec, ClassSpec):
+            methods = ", ".join(f"{name}=proto[{index}]" for name, index in spec.methods)
+            return f"BUILD_CLASS R{decoded.a} {spec.name} bases={spec.base_count} {methods}"
+        return f"BUILD_CLASS R{decoded.a} <bad spec>"
     if op is Op.LOAD_OUTER:
         return f"LOAD_OUTER R{decoded.a} depth={decoded.b} slot={decoded.c}"
     if op is Op.STORE_OUTER:

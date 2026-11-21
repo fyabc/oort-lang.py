@@ -9,7 +9,7 @@ instead of silently skipping it.
 
 from __future__ import annotations
 
-from ..bytecode import BytecodeModule, Decoded, Proto, decode
+from ..bytecode import BytecodeModule, ClassSpec, Decoded, Proto, decode
 from ..bytecode.opcodes import (
     BINARY_OPCODES,
     UNARY_OPCODES,
@@ -31,6 +31,7 @@ from .objects import (
     OortSlice,
     OortTuple,
 )
+from .type_system import OortType
 
 _BINARY_SYMBOLS = {opcode: symbol for symbol, opcode in BINARY_OPCODES.items()}
 _UNARY_SYMBOLS = {opcode: symbol for symbol, opcode in UNARY_OPCODES.items()}
@@ -66,7 +67,7 @@ class OortVMClosure(OortVMInvokable, OortObject):
 
     @property
     def arity(self) -> int:
-        return len(self.proto.params)
+        return len(self.proto.params) - (1 if self.proto.has_this else 0)
 
     def invoke(
         self,
@@ -197,6 +198,40 @@ class BytecodeVM:
                     self.module.functions[proto_index],
                     frame,
                 )
+                pc += 1
+            elif op is Op.BUILD_CLASS:
+                assert self.module is not None
+                spec = constants[decoded.bx]
+                if not isinstance(spec, ClassSpec):
+                    raise OortTypeError("Invalid class descriptor in bytecode.", position)
+                bases: list[OortType] = []
+                for index in range(spec.base_count):
+                    base = registers[proto.scratch_base + index]
+                    if not isinstance(base, OortType):
+                        raise OortTypeError(
+                            f"{base.type.name!r} object is not a class",
+                            position,
+                        )
+                    bases.append(base)
+                try:
+                    cls = OortType.create_type_object(spec.name, bases=bases)
+                except TypeError as exc:
+                    raise OortTypeError(str(exc), position) from exc
+                for method_name, method_index in spec.methods:
+                    if not 0 <= method_index < len(self.module.functions):
+                        raise OortTypeError(
+                            f"Invalid bytecode method index {method_index}.",
+                            position,
+                        )
+                    cls.set(
+                        method_name,
+                        OortVMClosure(
+                            self,
+                            self.module.functions[method_index],
+                            frame,
+                        ),
+                    )
+                registers[a] = cls
                 pc += 1
             elif op is Op.DEF_FUN:
                 assert self.module is not None

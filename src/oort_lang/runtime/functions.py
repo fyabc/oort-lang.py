@@ -46,8 +46,33 @@ class OortVMInvokable(OortCallableMixin):
     def invoke(self, args, position=None):
         raise NotImplementedError
 
+    def bind(self, this: OortObject) -> "OortVMMethod":
+        return OortVMMethod(this, self)
+
     def __call__(self, interpreter, args, position=None):
         return self.invoke(args, position)
+
+
+class OortVMMethod(OortVMInvokable, OortObject):
+    """A bytecode function bound to an instance as a method."""
+
+    def __init__(self, this: OortObject, target: OortVMInvokable):
+        super().__init__(get_runtime().types.function_type)
+        self.this = this
+        self.target = target
+
+    @property
+    def arity(self) -> int:
+        return self.target.arity
+
+    def invoke(self, args, position=None):
+        return self.target.invoke([self.this, *args], position)
+
+    def bind(self, this: OortObject) -> "OortVMMethod":
+        return self
+
+    def __repr__(self):
+        return f"<Bound VM method of {self.this!r}>"
 
 
 class OortFunctionMixin(OortCallableMixin):

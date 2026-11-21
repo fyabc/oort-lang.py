@@ -18,6 +18,7 @@ from .functions import (
     OortMethod,
     OortMethodMixin,
     OortNativeFunction,
+    OortVMInvokable,
 )
 from .host import HostBridge, PythonHost
 from .native import NativeMode
@@ -148,7 +149,8 @@ class OortType(OortInstance, OortCallableMixin):
         init_func = self.get("__init__")
         if init_func is None:
             return 0
-        assert isinstance(init_func, OortFunction)
+        if not isinstance(init_func, OortCallableMixin):
+            raise TypeError(f"{self.name}.__init__ is not callable")
         return init_func.arity
 
     def __call__(self, interpreter, args):
@@ -168,14 +170,17 @@ class OortType(OortInstance, OortCallableMixin):
             interpreter.check_instance_slots(instance, self)
             return instance
 
-        assert isinstance(init_func, OortFunction)
-        init_method = OortMethod(
-            this=instance,
-            node=init_func.node,
-            closure=init_func.closure,
-            defining_type=self._find_defining_type("__init__"),
-        )
-        init_method(interpreter, args)
+        if isinstance(init_func, OortVMInvokable):
+            interpreter.call_value(init_func.bind(instance), args)
+        else:
+            assert isinstance(init_func, OortFunction)
+            init_method = OortMethod(
+                this=instance,
+                node=init_func.node,
+                closure=init_func.closure,
+                defining_type=self._find_defining_type("__init__"),
+            )
+            init_method(interpreter, args)
         interpreter.check_instance_slots(instance, self)
         return instance
 

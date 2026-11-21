@@ -7,6 +7,7 @@ import dataclasses
 from ..diagnostics.syntax_errors import UnsupportedSyntax
 from ..hir.nodes import (
     BinOp,
+    BuildClass,
     BuildDict,
     BuildList,
     BuildSet,
@@ -40,7 +41,7 @@ from ..hir.nodes import (
     UnOp,
 )
 from ..source.source_position import SourcePosition
-from .code import BytecodeModule, Proto
+from .code import BytecodeModule, ClassSpec, Proto
 from .opcodes import (
     BINARY_OPCODES,
     UNARY_OPCODES,
@@ -125,6 +126,14 @@ class _ProtoCompiler:
         has_get_attr = any(isinstance(instruction, GetAttr) for instruction in function.code)
         has_set_attr = any(isinstance(instruction, SetAttr) for instruction in function.code)
         attr_scratch = 2 if has_set_attr else 1 if has_get_attr else 0
+        class_bases = max(
+            (
+                len(instruction.bases)
+                for instruction in function.code
+                if isinstance(instruction, BuildClass)
+            ),
+            default=0,
+        )
         self.scratch = max(
             self.max_args + 1,
             1 if self.has_iterator else 0,
@@ -133,6 +142,7 @@ class _ProtoCompiler:
             attr_scratch,
             build_elements,
             build_dict_slots,
+            class_bases,
         )
         self.register_count = function.local_count + self.scratch
         if self.register_count > _MAX_REGISTERS:
@@ -153,6 +163,8 @@ class _ProtoCompiler:
             constants=tuple(self.constants.values),
             line_table=tuple(self.lines),
             positions=tuple(self.positions),
+            scratch_base=self.scratch_base,
+            has_this=self.function.has_this,
         )
 
     def _emit(self, instruction: Instruction) -> None:
@@ -205,6 +217,18 @@ class _ProtoCompiler:
                 encode_abx(Op.MAKE_CLOSURE, instruction.dst, instruction.function_index),
                 position,
             )
+            return
+        if isinstance(instruction, BuildClass):
+            base = self.scratch_base
+            for index, source in enumerate(instruction.bases):
+                self._word(encode_abc(Op.MOVE, base + index, source, 0), position)
+            spec = ClassSpec(
+                name=instruction.name,
+                base_count=len(instruction.bases),
+                methods=instruction.methods,
+            )
+            bx = self._constant(spec, position)
+            self._word(encode_abx(Op.BUILD_CLASS, instruction.dst, bx), position)
             return
         if isinstance(instruction, LoadGlobal):
             bx = self._constant(instruction.name, position)

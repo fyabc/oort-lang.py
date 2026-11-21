@@ -122,6 +122,54 @@ print(apply(do(v): v * 3, 7))
 val fs = [do: $0 + 1, do: $0 + 2]
 print(fs[0](10), fs[1](10))
 """,
+    """\
+class Counter {
+    def __init__(n) { this.n = n }
+    def inc() { this.n = this.n + 1; this.n }
+    def get() { this.n }
+}
+val c = Counter(10)
+print(c.get())
+print(c.inc())
+c.n = 20
+print(c.get())
+val bump = c.inc
+bump()
+print(c.get())
+""",
+    """\
+class Base {
+    def name() { "base" }
+    def value() { 1 }
+}
+class Derived < Base {
+    def name() { "derived" }
+}
+val d = Derived()
+print(d.name(), d.value())
+
+class WithInit {
+    def __init__(x) { this.x = x }
+    def make() { do: this.x }
+}
+print(WithInit(7).make()())
+print(map([1, 2], WithInit)[1].x)
+
+class Sub < WithInit {}
+print(Sub(9).x)
+""",
+    """\
+class Countdown {
+    def __init__(n) { this.n = n }
+    def __iter__() { do: this.step() }
+    def step() {
+        val current = this.n
+        this.n = this.n - 1
+        (current, current > 0)
+    }
+}
+for x in Countdown(3) { print(x) }
+""",
 ]
 
 
@@ -205,8 +253,25 @@ def test_vm_reports_division_by_zero(caplog: pytest.LogCaptureFixture):
     assert "division by zero" in caplog.text
 
 
+def test_vm_reports_class_errors(caplog: pytest.LogCaptureFixture):
+    compiler = get_compiler(["NOT_EXIST", "-t", "vm"])
+    with pytest.raises(CompilerError):
+        compiler.run_string("class C < 1 {}\nC()\n")
+    assert "object is not a class" in caplog.text
+
+    compiler = get_compiler(["NOT_EXIST", "-t", "vm"])
+    with pytest.raises(CompilerError):
+        compiler.run_string("class C { def __init__(x) { this.x = x } }\nC()\n")
+    assert "expects 2 arguments" in caplog.text
+
+    compiler = get_compiler(["NOT_EXIST", "-t", "vm"])
+    with pytest.raises(CompilerError):
+        compiler.run_string("class C {}\nprint(C().missing)\n")
+    assert "has no attribute 'missing'" in caplog.text
+
+
 def test_vm_rejects_unsupported_constructs(caplog: pytest.LogCaptureFixture):
     compiler = get_compiler(["NOT_EXIST", "-t", "vm"])
     with pytest.raises(CompilerError):
-        compiler.run_string("class C {}\n")
-    assert "HIR backend does not support ClassDef" in caplog.text
+        compiler.run_string("while true { break }\n")
+    assert "HIR backend does not support break/continue" in caplog.text

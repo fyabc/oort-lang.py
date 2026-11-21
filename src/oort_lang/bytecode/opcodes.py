@@ -72,6 +72,7 @@ class Op(IntEnum):
     LOAD_OUTER = 59
     STORE_OUTER = 60
     MAKE_CLOSURE = 61
+    BUILD_CLASS = 62
 
     EXTEND = 47
 
@@ -129,6 +130,7 @@ OP_FORMAT: dict[Op, str] = {
     Op.LOAD_OUTER: _FORMAT_ABC,
     Op.STORE_OUTER: _FORMAT_ABC,
     Op.MAKE_CLOSURE: _FORMAT_ABX,
+    Op.BUILD_CLASS: _FORMAT_ABX,
     Op.EXTEND: _FORMAT_AX,
 }
 

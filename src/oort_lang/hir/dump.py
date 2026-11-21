@@ -4,6 +4,7 @@
 
 from .nodes import (
     BinOp,
+    BuildClass,
     BuildDict,
     BuildList,
     BuildSet,
@@ -51,6 +52,10 @@ def format_instruction(instruction: Instruction) -> str:
         return f"STORE_OUTER depth={instruction.depth} slot={instruction.slot} R{instruction.src}"
     if isinstance(instruction, MakeClosure):
         return f"MAKE_CLOSURE R{instruction.dst} proto[{instruction.function_index}]"
+    if isinstance(instruction, BuildClass):
+        methods = ", ".join(f"{name}=proto[{index}]" for name, index in instruction.methods)
+        bases = ", ".join(f"R{base}" for base in instruction.bases)
+        return f"BUILD_CLASS R{instruction.dst} {instruction.name} bases=({bases}) {methods}"
     if isinstance(instruction, LoadGlobal):
         return f"LOAD_G R{instruction.dst} {instruction.name}"
     if isinstance(instruction, StoreGlobal):

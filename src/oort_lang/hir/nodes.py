@@ -77,6 +77,14 @@ class DefineFunction(Instruction):
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class BuildClass(Instruction):
+    dst: int
+    name: str
+    bases: tuple[int, ...]
+    methods: tuple[tuple[str, int], ...]
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class Move(Instruction):
     dst: int
     src: int
@@ -213,6 +221,7 @@ class HirFunction:
     position: SourcePosition
     is_main: bool = False
     is_lambda: bool = False
+    has_this: bool = False
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -227,6 +236,8 @@ def register_reads(instruction: Instruction) -> tuple[int, ...]:
         return ()
     if isinstance(instruction, (LoadConst, LoadGlobal, Label, Jump, DefineFunction)):
         return ()
+    if isinstance(instruction, BuildClass):
+        return instruction.bases
     if isinstance(instruction, LoadOuter):
         return ()
     if isinstance(instruction, StoreOuter):
@@ -296,6 +307,7 @@ def register_writes(instruction: Instruction) -> tuple[int, ...]:
             GetItem,
             LoadOuter,
             MakeClosure,
+            BuildClass,
         ),
     ):
         return (instruction.dst,)
@@ -326,6 +338,12 @@ def validate_module(module: HirModule) -> None:
                     raise ValueError(
                         f"{function.name}: bad function index {instruction.function_index}"
                     )
+            elif isinstance(instruction, BuildClass):
+                for method_name, method_index in instruction.methods:
+                    if not 0 <= method_index < len(module.functions):
+                        raise ValueError(
+                            f"{function.name}: bad method index {method_index} for {method_name!r}"
+                        )
             if isinstance(instruction, (LoadOuter, StoreOuter)):
                 if instruction.depth < 1:
                     raise ValueError(f"{function.name}: invalid outer depth {instruction.depth}")
