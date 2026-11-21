@@ -1,5 +1,12 @@
 #! /usr/bin/env python
 
+"""Historical AST-interpreter Fibonacci baseline.
+
+Broader interpreter coverage lives in test_micro.py, test_macro.py,
+test_stdlib.py, test_iterators.py and test_extensions.py. Keep this file small
+so its benchmark history stays comparable across backend changes.
+"""
+
 import pytest
 
 from .utils import get_compiler

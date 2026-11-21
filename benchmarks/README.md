@@ -46,6 +46,12 @@ dispatch, writes `benchmark.json`, and stores results with
 An alert is raised at a 150% regression against the stored history. PRs do not
 write history by default (forked PRs cannot push benchmark results).
 
+Cross-language numbers are **not** part of CI or the stored history: different
+runtimes, JIT warmup and program semantics make them unstable and easy to
+misread. They are an optional manual calibration for the P4 performance budget
+(see `docs/design/08-performance-benchmarking.md`). The primary comparison is
+always Oort's tree-walking interpreter vs. the Oort VM on identical programs.
+
 For local comparisons, save a baseline on a quiet machine and compare:
 
 ```bash

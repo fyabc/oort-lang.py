@@ -1,0 +1,19 @@
+def loop_sum(n) {
+    var total = 0
+    for i in range(n) {
+        total = total + i
+    }
+    total
+}
+
+loop_sum(1000)
+val start = clock()
+var reps = 0
+var result = 0
+while reps < 100000 {
+    result = loop_sum(20000)
+    reps = reps + 1
+    if (clock() - start) * 1000.0 >= 100.0: break
+}
+print(result)
+print((clock() - start) * 1000.0 / reps)

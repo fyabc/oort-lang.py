@@ -1,0 +1,16 @@
+def fib(n) {
+    if n <= 1: return n
+    fib(n - 1) + fib(n - 2)
+}
+
+fib(18)
+val start = clock()
+var reps = 0
+var result = 0
+while reps < 100000 {
+    result = fib(20)
+    reps = reps + 1
+    if (clock() - start) * 1000.0 >= 100.0: break
+}
+print(result)
+print((clock() - start) * 1000.0 / reps)
