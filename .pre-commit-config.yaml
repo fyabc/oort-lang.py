@@ -3,10 +3,13 @@ repos:
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
-        exclude: ^src/oort_lang/parser/grammar/
+        # RESULTS.md is generated; its metadata block uses Markdown hard breaks.
+        exclude: ^(src/oort_lang/parser/grammar/|benchmarks/RESULTS\.md$)
       - id: end-of-file-fixer
         exclude: ^src/oort_lang/parser/grammar/
       - id: check-yaml
+        # mkdocs.yml uses pymdownx's Python-tagged slugify hook.
+        args: [--unsafe]
       - id: check-added-large-files
       - id: check-merge-conflict
       - id: debug-statements

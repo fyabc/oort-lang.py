@@ -159,7 +159,7 @@ AST；HIR/字节码只导入其中的数据类型：
 
 ```text
 ParamKind: POS_ONLY | POS_OR_KW | VAR_POS | KW_ONLY | VAR_KW | BLOCK
-ParamSpec(name, kind, slot, default_proto?) 
+ParamSpec(name, kind, slot, default_proto?)
 SignatureSpec(params, has_this)
 ArgKind: POSITIONAL | KEYWORD | BLOCK
 EvaluatedArg(kind, value, keyword_name?)
